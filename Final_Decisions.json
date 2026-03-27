@@ -1,0 +1,571 @@
+{
+  "name": "Final_Decisions",
+  "nodes": [
+    {
+      "parameters": {
+        "model": "openai/gpt-oss-safeguard-20b",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        600,
+        208
+      ],
+      "id": "676c091c-fb18-47bb-b393-afea978f4af0",
+      "name": "Groq Chat Model1",
+      "credentials": {
+        "groqApi": {
+          "id": "w2kySJjiKQ2jRWG1",
+          "name": "Groq account 3"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=CURRENT TIME:\n{{$json.time}}\nCROP INFO:\n- Type:          {{$json.crop.type}}\n- Growth stage:  {{$json.crop.growth_stage}}\n- Farm mode:     {{$json.crop.mode}}\nWEATHER:\n- State:                     {{$json.weather.state}}\n- Precipitation probability: {{$json.weather.precipitation_probability}}%\n- Summary:                   {{$json.weather.summary}}\nIMAGE PROCESSING (current):\n- Summary:          {{$json.image_processing.summary}}\n- Confidence:       {{$json.image_processing.confidence}}%\n- Rain detected:    {{$json.image_processing.features.rain_detected}}\n- Water on leaves:  {{$json.image_processing.features.water_on_leaves}}\n- Cloud cover:      {{$json.image_processing.features.cloud_cover}}\n- Lighting level:   {{$json.image_processing.features.lighting_level}}\n- Plant motion:     {{$json.image_processing.features.plant_motion_detected}}\n- Motion intensity: {{$json.image_processing.features.motion_intensity}}\nHISTORY — 7-DAY SENSOR AVERAGES:\n{{JSON.stringify($json.history.runs.averages_7d)}}\nHISTORY — WATER CONSUMPTION LAST 7 DAYS:\n{{JSON.stringify($json.history.runs.water_consumption_7d)}}\nHISTORY — LAST 3 RUNS:\n{{JSON.stringify($json.history.runs.last_runs)}}\nHISTORY — IMAGE AVERAGES 7 DAYS:\n{{JSON.stringify($json.history.images.averages_7d)}}\nHISTORY — LAST 3 IMAGES:\n{{JSON.stringify($json.history.images.last_images)}}\nACTUATORS TO SCHEDULE ({{$json.actuators.length}} total — types: {{$json.actuators.map(a => a.type).join(', ')}}):\n{{JSON.stringify($json.actuators)}}\nBased on all the above, for each of the {{$json.actuators.length}} actuator(s) ({{$json.actuators.map(a => a.type).join(', ')}}), decide: run now, delay, or flag for re-evaluation.\nReturn a single JSON object with exactly two fields: actuators, recommendation.\n- actuators: array of exactly {{$json.actuators.length}} object(s), same order, same types: {{$json.actuators.map(a => a.type).join(', ')}}\n- recommendation: ~170 character plain-language farm summary\nNo explanation, no extra fields, no markdown. Only the JSON object.",
+        "options": {
+          "systemMessage": "You are an expert agricultural scheduling AI. Your role is to decide, for each actuator that has been cleared for activation (TURN-ON), whether to run it immediately, delay it to a better time, or flag it for re-evaluation if the situation is too ambiguous to decide. You also provide a short farmer-friendly recommendation.\n\n─── INPUT YOU WILL RECEIVE ─────────────────────────────────────────────────────\n\n- Current time\n- Crop info (type, growth stage, farm mode)\n- Weather (summary, precipitation probability)\n- Image processing (what the camera saw: rain, wet leaves, cloud cover, etc.)\n- History (7-day sensor averages, water consumption, last 3 runs, last 3 images)\n- Actuators to schedule (only TURN-ON actuators, with their current run and re-evaluation intervals)\n\n─── IMAGE PROCESSING RULES ─────────────────────────────────────────────────────\n\nIf the image summary indicates that no image was taken or no image should be considered (e.g. \"no image to be taken into consideration\", \"no image available\", or any similar message), then:\n- Completely ignore all image processing fields\n- Do NOT use image data in your decision\n- Do NOT flag actuators for re-evaluation based on image uncertainty alone\n- Base your decision entirely on weather + history + sensor data\n\n─── YOUR DECISION FOR EACH ACTUATOR ────────────────────────────────────────────\n\nFor each actuator you receive, you must choose one of three outcomes:\n\nOUTCOME 1 — RUN NOW:\n  Conditions are favorable. Run the actuator immediately.\n  → classification: \"TURN-ON\"\n  → run.active: true\n  → run.execute_at: current time in \"HH:MM\" format\n  → run.execute_until: a future time in \"HH:MM\" format (you decide the duration)\n  → run.duration_minutes: integer (difference between execute_at and execute_until)\n  → re_evaluation.active: false\n  → re_evaluation.skipped: false\n  → re_evaluation.interval.start: null\n  → re_evaluation.interval.end: null\n\nOUTCOME 2 — DELAY:\n  Conditions are not ideal right now but will improve. Schedule for a better time.\n  → classification: \"TURN-ON\"\n  → run.active: true\n  → run.execute_at: a future time in \"HH:MM\" format (you decide when)\n  → run.execute_until: a future time in \"HH:MM\" format\n  → run.duration_minutes: integer\n  → re_evaluation.active: false\n  → re_evaluation.skipped: false\n  → re_evaluation.interval.start: null\n  → re_evaluation.interval.end: null\n\nOUTCOME 3 — NEED-RE-EVALUATION:\n  Signals are too conflicting or ambiguous to make a confident decision.\n  → classification: \"NEED-RE-EVALUATION\"\n  → run.active: false\n  → run.execute_at: null\n  → run.execute_until: null\n  → run.duration_minutes: null\n  → re_evaluation.active: true\n  → re_evaluation.skipped: false\n  → re_evaluation.interval.start: a future time \"HH:MM\" (when to re-check)\n  → re_evaluation.interval.end: a future time \"HH:MM\" (end of re-check window)\n\n─── RECOMMENDATION ─────────────────────────────────────────────────────────────\n\nWrite a single plain-language recommendation string that:\n- Summarizes the overall farm situation in farmer-friendly language\n- Mentions what actions are being taken or delayed and why\n- Is approximately 170 characters long (strict maximum 200 characters)\n- Uses no technical jargon, no JSON, no bullet points, just a natural sentence or two\n\n─── DECISION GUIDELINES ────────────────────────────────────────────────────────\n\nPUMP (irrigation):\n  - Delay or re-evaluate if: rain is coming (high precipitation probability), water already on leaves, soil visually wet from image, recent heavy irrigation in history\n  - Run now if: soil moisture is low, no rain risk, conditions are dry, crop stage demands water (e.g. flowering is critical)\n  - Consider farm mode: growth_priority = prioritize plant health, water_saver = minimize irrigation\n\nFAN (ventilation):\n  - Delay or re-evaluate if: strong wind detected in image, storm incoming, plant motion is intense\n  - Run now if: temperature is high, humidity is high, luminosity is elevated\n  - Consider time of day: running fan at night is usually unnecessary unless humidity is critical\n\nGENERAL:\n  - Always cross-reference weather + image + history together, never decide from one signal alone\n  - If image confidence is below 60, reduce its weight in your decision\n  - Respect the farm mode: growth_priority = act aggressively for plant health, energy_saver = minimize activations, water_saver = minimize pump usage, balanced = use judgment\n  - Use history averages to detect anomalies (e.g. if current soil moisture is much lower than 7d average, irrigate now)\n\n─── OUTPUT FORMAT ───────────────────────────────────────────────────────────────\n\nReturn ONLY a valid JSON object with exactly these two top-level fields:\n\n{\n  \"actuators\": [...],\n  \"recommendation\": \"...\"\n}\n\n\"actuators\" array rules:\n  - EXACTLY the same number of actuators you received, same order, same types\n  - Each object must have EXACTLY these fields: type, classification, run, re_evaluation\n  - Do not add any extra fields inside actuator objects\n  - Do not rename types, do not invent new actuators like \"pump1\" or \"fan2\"\n\n\"recommendation\" rules:\n  - A single string, ~170 characters, maximum 200\n  - Plain farmer-friendly language, no markdown, no bullet points\n\n─── STRICT OUTPUT RULES ─────────────────────────────────────────────────────────\n\n- Return ONLY the JSON object, nothing else\n- No explanation, no commentary, no markdown, no code blocks\n- All times in ISO 8601 format: \"YYYY-MM-DDTHH:MM:SS\" (e.g. \"2026-03-26T06:00:00\")\n- duration_minutes must be a positive integer when set, null otherwise\n- Before outputting, verify: does every type in actuators match exactly what you received? If not, fix it."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        528,
+        -16
+      ],
+      "id": "fdbbd907-7915-44ac-b3e7-8a35b22d1b1d",
+      "name": "Final_Decider"
+    },
+    {
+      "parameters": {
+        "jsCode": "const allItems = $input.all().map(i => i.json);\n\nconst mainJson = allItems.find(i => i.meta !== undefined);\nconst image    = allItems.find(i => i.summary !== undefined);\n\nif (image) {\n  mainJson.image_processing.summary    = image.summary    ?? null;\n  mainJson.image_processing.confidence = image.confidence ?? null;\n  mainJson.image_processing.features   = image.features   ?? mainJson.image_processing.features;\n}\n\nreturn [{ json: mainJson }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        80,
+        -16
+      ],
+      "id": "d3ff6c49-c76d-4d6d-9d9f-8a8bd0a0cb89",
+      "name": "Merge the results"
+    },
+    {
+      "parameters": {
+        "jsCode": "const main = items[0].json;\n\n// ─── Weather feedback: only entries where value is null ───────────────────────\nconst filteredFeedback = (main.weather?.feedback ?? []).filter(f => {\n  const val = Object.values(f)[0];\n  return val === null;\n});\n\n// ─── Actuators: only TURN-ON (both modes) ────────────────────────────────────\nconst filteredActuators = (main.actuators ?? [])\n  .filter(a => a.classification === 'TURN-ON')\n  .map(a => ({\n    type: a.type,\n    run: {\n      execute_at:    a.run?.execute_at    ?? null,\n      execute_until: a.run?.execute_until ?? null\n    },\n    re_evaluation: {\n      start: a.re_evaluation?.interval?.start ?? null,\n      end:   a.re_evaluation?.interval?.end   ?? null\n    }\n  }));\n\n// ─── History: safe check ─────────────────────────────────────────────────────\nlet filteredHistory = null;\nif (main.history) {\n  filteredHistory = {\n    runs: {\n      averages_7d:          main.history.runs?.averages_7d ?? null,\n      water_consumption_7d: main.history.runs?.water_consumption_7d ?? null,\n      last_runs:            (main.history.runs?.last_7_days_runs ?? []).slice(0, 3)\n    },\n    images: {\n      averages_7d: main.history.images?.averages_7d ?? null,\n      last_images: (main.history.images?.last_7_days ?? []).slice(0, 3)\n    }\n  };\n}\n\n// ─── Assemble output ──────────────────────────────────────────────────────────\nconst output = {\n  time: main.meta?.triggered_at ?? null,\n  crop: main.crop ?? null,\n  weather: {\n    precipitation_probability: main.weather?.precipitation_probability ?? null,\n    summary:                   main.weather?.summary ?? null,\n    feedback:                  filteredFeedback\n  },\n  image_processing: main.image_processing ?? null,\n  history:          filteredHistory, // will be null if history missing\n  actuators:        filteredActuators\n};\n\nreturn [{ json: output }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        304,
+        -16
+      ],
+      "id": "c7b3fab2-9960-41a1-9ead-927cb2c3bae2",
+      "name": "filter only what is needed for final decisions"
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw      = JSON.parse($input.first().json.output);\nconst mainJson = { ...$('Merge the results').first().json };\n\n// ─── Merge actuators ──────────────────────────────────────────────────────────\nconst decisionMap = {};\nraw.actuators.forEach(a => {\n  decisionMap[a.type.toLowerCase()] = a;\n});\nmainJson.actuators = mainJson.actuators.map(a => {\n  const decision = decisionMap[a.type.toLowerCase()];\n  if (!decision) return a;\n  return {\n    ...a,\n    classification: decision.classification,\n    run: {\n      ...a.run,\n      active:           decision.run.active,\n      execute_at:       decision.run.execute_at        ?? null,\n      execute_until:    decision.run.execute_until      ?? null,\n      duration_minutes: decision.run.duration_minutes   ?? null\n    },\n    re_evaluation: {\n      ...a.re_evaluation,\n      active:  decision.re_evaluation.active,\n      skipped: decision.re_evaluation.skipped,\n      interval: {\n        start: decision.re_evaluation.start ?? decision.re_evaluation.interval?.start ?? null,\n        end:   decision.re_evaluation.end   ?? decision.re_evaluation.interval?.end   ?? null\n      }\n    }\n  };\n});\n\n// ─── Merge recommendation ─────────────────────────────────────────────────────\nmainJson.recommendation = raw.recommendation ?? null;\n\n// ─── Remove history ───────────────────────────────────────────────────────────\ndelete mainJson.history;\n\nreturn [{ json: mainJson }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        -16
+      ],
+      "id": "95013d78-e36f-45f7-b905-e5ae60fcf90a",
+      "name": "Final_Decisions"
+    },
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -144,
+        -16
+      ],
+      "id": "209f7574-6030-438e-be00-fbe0ec264de8",
+      "name": "Weather_Fetcher + Image_Processing"
+    }
+  ],
+  "pinData": {
+    "Weather_Fetcher + Image_Processing": [
+      {
+        "json": {
+          "meta": {
+            "run_id": "a9b08d-b6fc4b5a25fd",
+            "triggered_at": "2026-03-27T13:38:32"
+          },
+          "location": {
+            "latitude": 36.71743830106968,
+            "longitude": 3.1542778015136723,
+            "timezone": "Africa/Algiers"
+          },
+          "crop": {
+            "type": "orange",
+            "growth_stage": "flowering",
+            "mode": "growth_priority"
+          },
+          "sensors": [
+            {
+              "type": "soil_moisture",
+              "value": null,
+              "description": null
+            },
+            {
+              "type": "temperature",
+              "value": null,
+              "description": null
+            },
+            {
+              "type": "air_humidity",
+              "value": null,
+              "description": null
+            },
+            {
+              "type": "luminosity",
+              "value": null,
+              "description": null
+            }
+          ],
+          "actuators": [
+            {
+              "type": "pump",
+              "status": "off",
+              "control_mode": "auto",
+              "classification": "KEEP-OFF",
+              "skipped": false,
+              "run": {
+                "active": false,
+                "execute_at": null,
+                "duration_minutes": null,
+                "execute_until": null
+              },
+              "re_evaluation": {
+                "active": false,
+                "skipped": false,
+                "interval": {
+                  "start": null,
+                  "end": null
+                }
+              }
+            },
+            {
+              "type": "fan",
+              "status": "off",
+              "control_mode": "semi-auto",
+              "classification": "KEEP-OFF",
+              "skipped": false,
+              "recommended_action": null,
+              "run": {
+                "active": false,
+                "execute_at": null,
+                "duration_minutes": null,
+                "execute_until": null
+              },
+              "re_evaluation": {
+                "active": false,
+                "skipped": false,
+                "interval": {
+                  "start": null,
+                  "end": null
+                }
+              }
+            }
+          ],
+          "notifications": null,
+          "warnings": [
+            {
+              "name": "frost_risk",
+              "active": false,
+              "severity": null,
+              "description": null
+            },
+            {
+              "name": "heavy_rainfall",
+              "active": false,
+              "severity": null,
+              "description": null
+            },
+            {
+              "name": "high_humidity_level",
+              "active": false,
+              "severity": null,
+              "description": null
+            },
+            {
+              "name": "high_temperature_detected",
+              "active": false,
+              "severity": null,
+              "description": null
+            },
+            {
+              "name": "insufficient_sunlight",
+              "active": false,
+              "severity": null,
+              "description": null
+            },
+            {
+              "name": "excessive_sunlight",
+              "active": false,
+              "severity": null,
+              "description": null
+            },
+            {
+              "name": "low_soil_moisture",
+              "active": false,
+              "severity": null,
+              "description": null
+            },
+            {
+              "name": "overwatering",
+              "active": false,
+              "severity": null,
+              "description": null
+            },
+            {
+              "name": "strong_wind",
+              "active": false,
+              "severity": null,
+              "description": null
+            }
+          ],
+          "recommendation": null,
+          "weather": {
+            "precipitation_probability": 18,
+            "state": "cloudy",
+            "summary": "The next 48 hours in Algiers will see a gradual increase in temperatures, reaching a peak of 17.5°C in the afternoon before slightly decreasing in the evening. Despite some clouds passing by, no significant rainfall is expected except for a slight rain risk around midnight. Overall, the weather will be predominantly dry and relatively mild.",
+            "insights": {
+              "highlights": {
+                "max_temperature": {
+                  "value": 17.5,
+                  "time": "2026-03-27T14:00"
+                },
+                "min_temperature": {
+                  "value": 6.8,
+                  "time": "2026-03-28T06:00"
+                }
+              },
+              "hourly": [
+                {
+                  "time": "2026-03-27T00:00",
+                  "temperature": 9.8,
+                  "humidity": 79,
+                  "precipitation_probability": 0
+                },
+                {
+                  "time": "2026-03-27T03:00",
+                  "temperature": 8.5,
+                  "humidity": 81,
+                  "precipitation_probability": 5
+                },
+                {
+                  "time": "2026-03-27T06:00",
+                  "temperature": 9.1,
+                  "humidity": 72,
+                  "precipitation_probability": 3
+                },
+                {
+                  "time": "2026-03-27T09:00",
+                  "temperature": 12.2,
+                  "humidity": 63,
+                  "precipitation_probability": 0
+                },
+                {
+                  "time": "2026-03-27T12:00",
+                  "temperature": 16.3,
+                  "humidity": 44,
+                  "precipitation_probability": 0
+                },
+                {
+                  "time": "2026-03-27T15:00",
+                  "temperature": 17,
+                  "humidity": 41,
+                  "precipitation_probability": 0
+                },
+                {
+                  "time": "2026-03-27T18:00",
+                  "temperature": 13.5,
+                  "humidity": 67,
+                  "precipitation_probability": 8
+                },
+                {
+                  "time": "2026-03-27T21:00",
+                  "temperature": 11.4,
+                  "humidity": 82,
+                  "precipitation_probability": 10
+                },
+                {
+                  "time": "2026-03-28T00:00",
+                  "temperature": 10.8,
+                  "humidity": 75,
+                  "precipitation_probability": 3
+                },
+                {
+                  "time": "2026-03-28T03:00",
+                  "temperature": 8.5,
+                  "humidity": 84,
+                  "precipitation_probability": 0
+                },
+                {
+                  "time": "2026-03-28T06:00",
+                  "temperature": 6.8,
+                  "humidity": 89,
+                  "precipitation_probability": 0
+                },
+                {
+                  "time": "2026-03-28T09:00",
+                  "temperature": 11,
+                  "humidity": 69,
+                  "precipitation_probability": 0
+                },
+                {
+                  "time": "2026-03-28T12:00",
+                  "temperature": 15.4,
+                  "humidity": 47,
+                  "precipitation_probability": 0
+                },
+                {
+                  "time": "2026-03-28T15:00",
+                  "temperature": 15.8,
+                  "humidity": 44,
+                  "precipitation_probability": 0
+                },
+                {
+                  "time": "2026-03-28T18:00",
+                  "temperature": 14.3,
+                  "humidity": 52,
+                  "precipitation_probability": 0
+                },
+                {
+                  "time": "2026-03-28T21:00",
+                  "temperature": 10.7,
+                  "humidity": 71,
+                  "precipitation_probability": 0
+                }
+              ]
+            }
+          },
+          "history": {
+            "runs": {
+              "averages_7d": {
+                "soil_moisture": 36,
+                "temperature": 53,
+                "air_humidity": 57,
+                "luminosity": 83
+              },
+              "water_consumption_7d": [
+                {
+                  "day": "2026-03-26",
+                  "total_pump_minutes": 0
+                }
+              ],
+              "last_3_runs": [
+                {
+                  "triggered_at": "2026-03-26 22:43:14",
+                  "soil_moisture": 36,
+                  "temperature": 53,
+                  "air_humidity": 57,
+                  "luminosity": 83,
+                  "pump_decision": "NEED-RE-EVALUATION",
+                  "pump_duration_minutes": null,
+                  "fan_decision": "KEEP-ON",
+                  "fan_duration_minutes": null
+                },
+                {
+                  "triggered_at": "2026-03-26 23:19:30",
+                  "soil_moisture": 36,
+                  "temperature": 53,
+                  "air_humidity": 57,
+                  "luminosity": 83,
+                  "pump_decision": "NEED-RE-EVALUATION",
+                  "pump_duration_minutes": null,
+                  "fan_decision": "TURN-ON",
+                  "fan_duration_minutes": 60
+                },
+                {
+                  "triggered_at": "2026-03-26 23:24:26",
+                  "soil_moisture": 36,
+                  "temperature": 53,
+                  "air_humidity": 57,
+                  "luminosity": 83,
+                  "pump_decision": "NEED-RE-EVALUATION",
+                  "pump_duration_minutes": null,
+                  "fan_decision": "NEED-RE-EVALUATION",
+                  "fan_duration_minutes": null
+                }
+              ]
+            },
+            "images": {
+              "averages_7d": {
+                "confidence": 93,
+                "rain_detected": true,
+                "water_on_leaves": true,
+                "cloud_cover": "high",
+                "lighting_level": "low",
+                "shadows_present": true,
+                "plant_motion_detected": true,
+                "motion_intensity": "moderate"
+              },
+              "decision_stats_7d": {
+                "pump": "NEED-RE-EVALUATION",
+                "fan": "KEEP-ON"
+              },
+              "last_3_runs": [
+                {
+                  "timestamp": "2026-03-26 22:43:14",
+                  "image_summary": "Heavy rainfall has left the soil and leaves visibly wet; cloud coverage is high, blocking the sun; shadows are present despite low lighting; plants show moderate motion due to wind.",
+                  "confidence": 93,
+                  "rain_detected": true,
+                  "water_on_leaves": true,
+                  "cloud_cover": "high",
+                  "lighting_level": "low",
+                  "shadows_present": true,
+                  "plant_motion_detected": true,
+                  "motion_intensity": "moderate",
+                  "decision": {
+                    "pump": "NEED-RE-EVALUATION",
+                    "fan": "KEEP-ON"
+                  }
+                },
+                {
+                  "timestamp": "2026-03-26 23:19:30",
+                  "image_summary": "Heavy rainfall has left the soil and leaves visibly wet; cloud coverage is high, blocking the sun; shadows are present despite low lighting; plants show moderate motion due to wind.",
+                  "confidence": 93,
+                  "rain_detected": true,
+                  "water_on_leaves": true,
+                  "cloud_cover": "high",
+                  "lighting_level": "low",
+                  "shadows_present": true,
+                  "plant_motion_detected": true,
+                  "motion_intensity": "moderate",
+                  "decision": {
+                    "pump": "NEED-RE-EVALUATION",
+                    "fan": "TURN-ON"
+                  }
+                },
+                {
+                  "timestamp": "2026-03-26 23:24:26",
+                  "image_summary": "Heavy rainfall has left the soil and leaves visibly wet; cloud coverage is high, blocking the sun; shadows are present despite low lighting; plants show moderate motion due to wind.",
+                  "confidence": 93,
+                  "rain_detected": true,
+                  "water_on_leaves": true,
+                  "cloud_cover": "high",
+                  "lighting_level": "low",
+                  "shadows_present": true,
+                  "plant_motion_detected": true,
+                  "motion_intensity": "moderate",
+                  "decision": {
+                    "pump": "NEED-RE-EVALUATION",
+                    "fan": "NEED-RE-EVALUATION"
+                  }
+                }
+              ]
+            }
+          },
+          "image_processing": {
+            "summary": null,
+            "features": {
+              "rain_detected": null,
+              "water_on_leaves": null,
+              "cloud_cover": null,
+              "lighting_level": null,
+              "shadows_present": null,
+              "plant_motion_detected": null,
+              "motion_intensity": null
+            },
+            "confidence": null
+          }
+        }
+      },
+      {
+        "json": {
+          "summary": "Heavy rainfall has left the soil and leaves visibly wet; cloud coverage is high, blocking the sun; shadows are present despite low lighting; plants show moderate motion due to wind.",
+          "features": {
+            "rain_detected": true,
+            "water_on_leaves": true,
+            "cloud_cover": "high",
+            "lighting_level": "low",
+            "shadows_present": true,
+            "plant_motion_detected": true,
+            "motion_intensity": "moderate"
+          },
+          "confidence": 93
+        }
+      }
+    ]
+  },
+  "connections": {
+    "Groq Chat Model1": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Final_Decider",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Final_Decider": {
+      "main": [
+        [
+          {
+            "node": "Final_Decisions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge the results": {
+      "main": [
+        [
+          {
+            "node": "filter only what is needed for final decisions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "filter only what is needed for final decisions": {
+      "main": [
+        [
+          {
+            "node": "Final_Decider",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Weather_Fetcher + Image_Processing": {
+      "main": [
+        [
+          {
+            "node": "Merge the results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "e4ad721e-7937-465e-b647-ff31036671eb",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "af73889df6e41fa948c9be83dfce5dd763c977531265542df4d02721aa9d9365"
+  },
+  "id": "JpvsVRcZobHZN0N4",
+  "tags": []
+}

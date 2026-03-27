@@ -1,0 +1,436 @@
+{
+  "name": "Data_Sender",
+  "nodes": [
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first().json;\n\nconst activeActuators = (input.actuators ?? []).filter(a => a.skipped === false);\n\nconst actuators = activeActuators.length === 0 ? null : activeActuators.map(a => ({\n  type:           a.type,\n  classification: a.classification ?? null,\n  ...(a.control_mode === 'semi-auto' ? { recommended_action: a.recommended_action ?? null } : {}),\n  run:            a.run            ?? null,\n  re_evaluation:  a.re_evaluation  ?? null\n}));\n\nconst output = {\n  sensors: input.sensors.map(s => ({\n    type:        s.type,\n    description: s.description ?? null\n  })),\n  actuators,\n  notifications:  input.notifications  ?? null,\n  warnings:       input.warnings       ?? null,\n  recommendation: input.recommendation ?? null,\n  weather:        input.weather        ?? null\n};\n\nreturn [{ json: output }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        0
+      ],
+      "id": "ef186b61-4c73-4ddb-96f0-9f683beae3cd",
+      "name": "data sender filter"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ─── 0. Get input from n8n ─────────────────────────────────────────────────────\nconst input = $input.first().json;\n\nconst entities = [];\n\n// ─── Helper: convert \"HH:MM\" to full ISO datetime using today's date ──────────\nfunction toFullDatetime(timeStr) {\n  if (!timeStr) return null;\n  if (timeStr.includes('T') || timeStr.length > 5) return timeStr;\n  const now = new Date();\n  const yyyy = now.getFullYear();\n  const mm   = String(now.getMonth() + 1).padStart(2, '0');\n  const dd   = String(now.getDate()).padStart(2, '0');\n  return `${yyyy}-${mm}-${dd}T${timeStr}:00`;\n}\n\n// ─── 1. n8n_response (everything except actuators) ───────────────────────────\nconst { actuators, ...rest } = input;\n\nentities.push({\n  entity_id: 'sensor.n8n_response',\n  state: 'ok',\n  value: rest\n});\n\n// ─── 2. Loop through actuators ─────────────────────────────────────────────────\nconst keepClassifications = ['KEEP-ON', 'KEEP-OFF', 'ON', 'OFF'];\n\nfor (const actuator of (actuators ?? [])) {\n  const type           = actuator.type;\n  const classification = actuator.classification;\n\n  // ── NEED-RE-EVALUATION ──\n  if (classification === 'NEED-RE-EVALUATION') {\n    entities.push({\n      entity_id: `input_datetime.${type}_re_evaluation_start`,\n      value: toFullDatetime(actuator.re_evaluation?.interval?.start ?? null)\n    });\n    entities.push({\n      entity_id: `input_datetime.${type}_re_evaluation_end`,\n      value: toFullDatetime(actuator.re_evaluation?.interval?.end ?? null)\n    });\n  }\n\n  // ── TURN-ON ──\n  else if (classification === 'TURN-ON') {\n    const executeAt    = actuator.run?.execute_at ?? null;\n    const executeUntil = actuator.run?.execute_until ?? null;\n\n    entities.push({\n      entity_id: `input_datetime.${type}_excecute_at`,\n      value: toFullDatetime(executeAt)\n    });\n    entities.push({\n      entity_id: `input_datetime.${type}_excecute_until`,\n      value: toFullDatetime(executeUntil)\n    });\n\n    // Optional: auto mode status if you want to keep it\n    if (actuator.control_mode === 'auto' && !executeAt) {\n      entities.push({\n        entity_id: `input_boolean.${type}_status`,\n        state: 'on'\n      });\n    }\n  }\n\n  // ── KEEP-* → nothing ──\n  else if (keepClassifications.includes(classification)) {\n    // intentionally empty\n  }\n\n  // ── ANY recommended_action field ──\n  if (actuator.recommended_action !== undefined) {\n    entities.push({\n      entity_id: `input_text.${type}_recommended_action`,\n      value: actuator.recommended_action\n    });\n  }\n}\n\n// ─── 3. Return all entities for n8n ───────────────────────────────────────────\nreturn entities.map(e => ({ json: e }));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        0
+      ],
+      "id": "9acc6b0b-d766-4918-a6f8-283308c4b397",
+      "name": "entity + value pairs maker"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\nconst HA_BASE_URL = 'http://192.168.100.34:8123/api/states/';\n\nreturn items.map(item => ({\n  json: {\n    ...item.json,\n    url: `${HA_BASE_URL}${item.json.entity_id}`\n  }\n}));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        0
+      ],
+      "id": "83f21207-3c89-4e32-a8b6-06f3a619eb75",
+      "name": "join each value with the url in ha"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.url }}",
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "{\n        \"Authorization\": \"Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJkNWE1ZDVjMzQyNTE0MzE4YjI0MTI1NjZiOTNlOWEzNiIsImlhdCI6MTc3MTkzMDY5MCwiZXhwIjoyMDg3MjkwNjkwfQ.obmGhZBspOzi-72YyCCsca-qiL8w5sNgPnHnJJmZL94\",\n        \"Content-Type\": \"application/json\"\n      }",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"state\": \"{{ typeof $json.value === 'object' ? 'ok' : $json.value }}\",\n  \"attributes\": {\n    \"data\": \"{{ typeof $json.value === 'object' ? $json.value : undefined }}\"\n  }\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        896,
+        0
+      ],
+      "id": "81ae8b3f-a79a-4b44-84fc-dc7bfdabcede",
+      "name": "data sender",
+      "executeOnce": false
+    },
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "753efad1-1a6e-4fec-84a9-465093a94c47",
+      "name": "Notifications_Manager"
+    }
+  ],
+  "pinData": {
+    "Notifications_Manager": [
+      {
+        "json": {
+          "meta": {
+            "run_id": "e2f046-5904c26089eb",
+            "triggered_at": "2026-03-27T13:46:11"
+          },
+          "location": {
+            "latitude": 36.71743830106968,
+            "longitude": 3.1542778015136723,
+            "timezone": "Africa/Algiers"
+          },
+          "crop": {
+            "type": "orange",
+            "growth_stage": "flowering",
+            "mode": "growth_priority"
+          },
+          "sensors": [
+            {
+              "type": "soil_moisture",
+              "value": 0,
+              "description": "Your soil is critically dry, irrigate immediately to avoid flower loss."
+            },
+            {
+              "type": "temperature",
+              "value": 20.2,
+              "description": "Temperature is comfortable, supporting healthy flowering."
+            },
+            {
+              "type": "air_humidity",
+              "value": 67.5,
+              "description": "Humidity is well balanced, reducing dehydration risk."
+            },
+            {
+              "type": "luminosity",
+              "value": 42,
+              "description": "Light levels are slightly low, consider supplemental lighting."
+            }
+          ],
+          "actuators": [
+            {
+              "type": "pump",
+              "status": "off",
+              "control_mode": "auto",
+              "classification": "NEED-RE-EVALUATION",
+              "skipped": false,
+              "run": {
+                "execute_at": null,
+                "duration_minutes": null,
+                "execute_until": null
+              },
+              "re_evaluation": {
+                "active": true,
+                "skipped": false,
+                "interval": {
+                  "start": "2026-03-27T18:00:00",
+                  "end": "2026-03-28T06:00:00"
+                }
+              }
+            },
+            {
+              "type": "fan",
+              "status": "off",
+              "control_mode": "semi-auto",
+              "classification": "KEEP-OFF",
+              "skipped": false,
+              "recommended_action": "Keep the fan off, no action is needed at this time.",
+              "run": {
+                "active": false,
+                "execute_at": null,
+                "duration_minutes": null,
+                "execute_until": null
+              },
+              "re_evaluation": {
+                "active": false,
+                "skipped": false,
+                "interval": {
+                  "start": null,
+                  "end": null
+                }
+              }
+            }
+          ],
+          "notifications": [
+            {
+              "title": "💧 Low Soil Moisture",
+              "description": "Dry soil threatens orange flower development. Consider watering soon."
+            },
+            {
+              "title": "🌧️ Overwatering Alert",
+              "description": "Leaves wet may cause fungal issues on orange flowers. Reduce irrigation."
+            },
+            {
+              "title": "☀️ Low Light Warning",
+              "description": "Low light may slow flowering. Provide shade or adjust schedule."
+            },
+            {
+              "title": "🌧️ Heavy Rain Alert",
+              "description": "Risk of waterlogging for flowering oranges. Check drainage."
+            },
+            {
+              "title": "💨 Wind Alert",
+              "description": "Wind may damage delicate orange flowers. Secure or protect."
+            },
+            {
+              "title": "☁️ Weather Outlook",
+              "description": "Cloudy with slight rain chance early hours. Mild temps rising."
+            }
+          ],
+          "warnings": [
+            {
+              "name": "frost_risk",
+              "active": false,
+              "severity": 0,
+              "description": "No frost risk detected, your orange trees are safe."
+            },
+            {
+              "name": "heavy_rainfall",
+              "active": true,
+              "severity": 45,
+              "description": "Rain detected, risk of waterlogging for flowering oranges."
+            },
+            {
+              "name": "high_humidity_level",
+              "active": false,
+              "severity": 0,
+              "description": "Humidity normal for orange flowers, no concern."
+            },
+            {
+              "name": "high_temperature_detected",
+              "active": false,
+              "severity": 0,
+              "description": "Temperature fine, no heat stress for orange trees."
+            },
+            {
+              "name": "insufficient_sunlight",
+              "active": true,
+              "severity": 50,
+              "description": "Low light may slow flowering in orange trees."
+            },
+            {
+              "name": "excessive_sunlight",
+              "active": false,
+              "severity": 0,
+              "description": "Sunlight levels are within safe range for oranges."
+            },
+            {
+              "name": "low_soil_moisture",
+              "active": true,
+              "severity": 70,
+              "description": "Dry soil threatens orange flower development."
+            },
+            {
+              "name": "overwatering",
+              "active": true,
+              "severity": 60,
+              "description": "Leaves wet may cause fungal issues on orange flowers."
+            },
+            {
+              "name": "strong_wind",
+              "active": true,
+              "severity": 35,
+              "description": "Wind may damage delicate orange flowers."
+            }
+          ],
+          "recommendation": "Heavy rain has soaked the soil and leaves, so we’re holding off on irrigation for now and will re-check later when the ground dries.",
+          "weather": {
+            "precipitation_probability": 18,
+            "state": "cloudy",
+            "summary": "Over the next 48 hours, Algiers will experience a mix of cloudy and sunny intervals with a slight chance of rain in the early hours. Temperature will gradually increase reaching a peak during midday. No significant weather disturbances are expected.",
+            "insights": {
+              "highlights": {
+                "max_temperature": {
+                  "value": 17.5,
+                  "time": "2026-03-27T14:00"
+                },
+                "min_temperature": {
+                  "value": 6.8,
+                  "time": "2026-03-28T06:00"
+                }
+              },
+              "hourly": [
+                {
+                  "time": "2026-03-27T00:00",
+                  "temperature": 9.8,
+                  "humidity": 79,
+                  "precipitation_probability": 0
+                },
+                {
+                  "time": "2026-03-27T03:00",
+                  "temperature": 8.5,
+                  "humidity": 81,
+                  "precipitation_probability": 5
+                },
+                {
+                  "time": "2026-03-27T06:00",
+                  "temperature": 9.1,
+                  "humidity": 72,
+                  "precipitation_probability": 3
+                },
+                {
+                  "time": "2026-03-27T09:00",
+                  "temperature": 12.2,
+                  "humidity": 63,
+                  "precipitation_probability": 0
+                },
+                {
+                  "time": "2026-03-27T12:00",
+                  "temperature": 16.3,
+                  "humidity": 44,
+                  "precipitation_probability": 0
+                },
+                {
+                  "time": "2026-03-27T15:00",
+                  "temperature": 17,
+                  "humidity": 41,
+                  "precipitation_probability": 0
+                },
+                {
+                  "time": "2026-03-27T18:00",
+                  "temperature": 13.5,
+                  "humidity": 67,
+                  "precipitation_probability": 8
+                },
+                {
+                  "time": "2026-03-27T21:00",
+                  "temperature": 11.4,
+                  "humidity": 82,
+                  "precipitation_probability": 10
+                },
+                {
+                  "time": "2026-03-28T00:00",
+                  "temperature": 10.8,
+                  "humidity": 75,
+                  "precipitation_probability": 3
+                },
+                {
+                  "time": "2026-03-28T03:00",
+                  "temperature": 8.5,
+                  "humidity": 84,
+                  "precipitation_probability": 0
+                },
+                {
+                  "time": "2026-03-28T06:00",
+                  "temperature": 6.8,
+                  "humidity": 89,
+                  "precipitation_probability": 0
+                },
+                {
+                  "time": "2026-03-28T09:00",
+                  "temperature": 11,
+                  "humidity": 69,
+                  "precipitation_probability": 0
+                },
+                {
+                  "time": "2026-03-28T12:00",
+                  "temperature": 15.4,
+                  "humidity": 47,
+                  "precipitation_probability": 0
+                },
+                {
+                  "time": "2026-03-28T15:00",
+                  "temperature": 15.8,
+                  "humidity": 44,
+                  "precipitation_probability": 0
+                },
+                {
+                  "time": "2026-03-28T18:00",
+                  "temperature": 14.3,
+                  "humidity": 52,
+                  "precipitation_probability": 0
+                },
+                {
+                  "time": "2026-03-28T21:00",
+                  "temperature": 10.7,
+                  "humidity": 71,
+                  "precipitation_probability": 0
+                }
+              ]
+            }
+          },
+          "image_processing": {
+            "summary": "Heavy rainfall has left the soil and leaves visibly wet; cloud coverage is high, blocking the sun; shadows are present despite low lighting; plants show moderate motion due to wind.",
+            "features": {
+              "rain_detected": true,
+              "water_on_leaves": true,
+              "cloud_cover": "high",
+              "lighting_level": "low",
+              "shadows_present": true,
+              "plant_motion_detected": true,
+              "motion_intensity": "moderate"
+            },
+            "confidence": 93
+          }
+        }
+      }
+    ]
+  },
+  "connections": {
+    "data sender filter": {
+      "main": [
+        [
+          {
+            "node": "entity + value pairs maker",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "entity + value pairs maker": {
+      "main": [
+        [
+          {
+            "node": "join each value with the url in ha",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "join each value with the url in ha": {
+      "main": [
+        [
+          {
+            "node": "data sender",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notifications_Manager": {
+      "main": [
+        [
+          {
+            "node": "data sender filter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "eb552cbb-5562-4fd0-9df1-eb3a2d8d89fc",
+  "meta": {
+    "instanceId": "af73889df6e41fa948c9be83dfce5dd763c977531265542df4d02721aa9d9365"
+  },
+  "id": "hHg6kjoNO1mzrYoZ",
+  "tags": []
+}

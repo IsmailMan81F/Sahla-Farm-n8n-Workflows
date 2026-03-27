@@ -1,0 +1,348 @@
+{
+  "name": "History_Loader",
+  "nodes": [
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -400,
+        -16
+      ],
+      "id": "97d67cd3-5b5b-4121-a3f7-c51f04f9e2ce",
+      "name": "Preliminary_Decisions"
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1hhZUzb_vaXrBVv_pv6G0IfiqtxUKAwfNxYkqOXD93f0",
+          "mode": "list",
+          "cachedResultName": "sahla_farm",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1hhZUzb_vaXrBVv_pv6G0IfiqtxUKAwfNxYkqOXD93f0/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 383692769,
+          "mode": "list",
+          "cachedResultName": "image_runs",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1hhZUzb_vaXrBVv_pv6G0IfiqtxUKAwfNxYkqOXD93f0/edit#gid=383692769"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        -176,
+        128
+      ],
+      "id": "f7cf1fdc-0660-4ea1-839a-052001b7fb94",
+      "name": "images history",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "E8fQO14Ggb744oak",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1hhZUzb_vaXrBVv_pv6G0IfiqtxUKAwfNxYkqOXD93f0",
+          "mode": "list",
+          "cachedResultName": "sahla_farm",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1hhZUzb_vaXrBVv_pv6G0IfiqtxUKAwfNxYkqOXD93f0/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1909675133,
+          "mode": "list",
+          "cachedResultName": "runs",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1hhZUzb_vaXrBVv_pv6G0IfiqtxUKAwfNxYkqOXD93f0/edit#gid=1909675133"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        -176,
+        -160
+      ],
+      "id": "510abe8b-c22b-4b5e-815e-85bbee19547d",
+      "name": "runs history",
+      "executeOnce": false,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "E8fQO14Ggb744oak",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "numberInputs": 3
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        48,
+        -32
+      ],
+      "id": "3d6961d1-d409-4f81-9711-f402d0545ed2",
+      "name": "Wait Both"
+    },
+    {
+      "parameters": {
+        "jsCode": "const allItems = $input.all().map(i => i.json);\n\n// Payload is the one that has \"meta\" field\nconst payload = allItems.find(i => i.meta !== undefined);\n\n// Runs rows — have row_number AND triggered_at but NOT timestamp\nconst rows = allItems.filter(i => i.row_number !== undefined && i.triggered_at !== undefined && i.timestamp === undefined);\n\n// Image rows — have timestamp AND summary (picture analysis rows)\nconst imageRows = allItems.filter(i => i.timestamp !== undefined && i.summary !== undefined);\n\n// ----------------------------------------------------------------\n// RUNS HISTORY\n// ----------------------------------------------------------------\nlet runsHistory = null;\n\nif (rows.length > 0) {\n  const sevenDaysAgo = new Date();\n  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);\n  const last7days = rows.filter(r => new Date(r.triggered_at) >= sevenDaysAgo);\n\n  const avg = (field) => {\n    const values = last7days.map(r => {\n      const sensors = typeof r.sensors === 'string' ? JSON.parse(r.sensors) : r.sensors;\n      return parseFloat(sensors?.[field]);\n    }).filter(v => !isNaN(v));\n    if (values.length === 0) return null;\n    return parseFloat((values.reduce((a, b) => a + b, 0) / values.length).toFixed(2));\n  };\n\n  const waterByDay = {};\n  last7days.forEach(r => {\n    const day = r.triggered_at?.slice(0, 10);\n    if (!day) return;\n    const actuators = typeof r.actuators === 'string' ? JSON.parse(r.actuators) : r.actuators;\n    const pump = Array.isArray(actuators) ? actuators.find(a => a.type === 'pump') : null;\n    const duration = parseFloat(pump?.duration_minutes) || 0;\n    waterByDay[day] = (waterByDay[day] || 0) + duration;\n  });\n\n  const water7d = Object.entries(waterByDay).map(([day, minutes]) => ({\n    day,\n    total_pump_minutes: parseFloat(minutes.toFixed(2))\n  }));\n\n  runsHistory = {\n    averages_7d: {\n      soil_moisture: avg('soil_moisture'),\n      temperature:   avg('temperature'),\n      air_humidity:  avg('air_humidity'),\n      luminosity:    avg('luminosity')\n    },\n    water_consumption_7d: water7d,\n    last_3_runs: last7days.slice(-3).map(r => {\n      const sensors   = typeof r.sensors   === 'string' ? JSON.parse(r.sensors)   : r.sensors;\n      const actuators = typeof r.actuators === 'string' ? JSON.parse(r.actuators) : r.actuators;\n      const pump = Array.isArray(actuators) ? actuators.find(a => a.type === 'pump') : null;\n      const fan  = Array.isArray(actuators) ? actuators.find(a => a.type === 'fan')  : null;\n      return {\n        triggered_at:          r.triggered_at,\n        soil_moisture:         sensors?.soil_moisture         ?? null,\n        temperature:           sensors?.temperature           ?? null,\n        air_humidity:          sensors?.air_humidity          ?? null,\n        luminosity:            sensors?.luminosity            ?? null,\n        pump_decision:         pump?.classification           ?? null,\n        pump_duration_minutes: pump?.duration_minutes         ?? null,\n        fan_decision:          fan?.classification            ?? null,\n        fan_duration_minutes:  fan?.duration_minutes          ?? null\n      };\n    })\n  };\n}\n\n// ----------------------------------------------------------------\n// IMAGE HISTORY\n// ----------------------------------------------------------------\nlet imagesHistory = null;\n\nif (imageRows.length > 0) {\n  const sevenDaysAgo = new Date();\n  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);\n  const last7daysImages = imageRows.filter(r => new Date(r.timestamp) >= sevenDaysAgo);\n\n  const parseFeatures = (raw) => {\n    if (!raw) return {};\n    if (typeof raw === 'object') return raw;\n    try { return JSON.parse(raw); } catch { return {}; }\n  };\n\n  const parseDecision = (raw) => {\n    if (!raw) return { pump: null, fan: null };\n    if (typeof raw === 'object') return raw;\n    try { return JSON.parse(raw); } catch { return { pump: null, fan: null }; }\n  };\n\n  const avgNum = (field) => {\n    const values = last7daysImages.map(r => parseFloat(r[field])).filter(v => !isNaN(v));\n    if (values.length === 0) return null;\n    return parseFloat((values.reduce((a, b) => a + b, 0) / values.length).toFixed(2));\n  };\n\n  const avgBool = (field) => {\n    const values = last7daysImages.map(r => {\n      const features = parseFeatures(r.features);\n      return features[field];\n    }).filter(v => v !== null && v !== undefined);\n    if (values.length === 0) return null;\n    const trueCount = values.filter(v => v === true || v === 'true').length;\n    return trueCount / values.length >= 0.5;\n  };\n\n  const avgMode = (field) => {\n    const values = last7daysImages.map(r => {\n      const features = parseFeatures(r.features);\n      return features[field];\n    }).filter(v => v !== null && v !== undefined);\n    if (values.length === 0) return null;\n    const freq = {};\n    values.forEach(v => { freq[v] = (freq[v] || 0) + 1; });\n    return Object.entries(freq).sort((a, b) => b[1] - a[1])[0][0];\n  };\n\n  const decisionStats = (actuator) => {\n    const decisions = last7daysImages.map(r => {\n      const d = parseDecision(r.actuator_decisions);\n      return d?.[actuator] ?? null;\n    }).filter(v => v !== null);\n    if (decisions.length === 0) return null;\n    const freq = {};\n    decisions.forEach(v => { freq[v] = (freq[v] || 0) + 1; });\n    return Object.entries(freq).sort((a, b) => b[1] - a[1])[0][0];\n  };\n\n  const last3 = last7daysImages.slice(-3).map(r => {\n    const features = parseFeatures(r.features);\n    const decision = parseDecision(r.actuator_decisions);\n    return {\n      timestamp:             r.timestamp,\n      image_summary:         r.summary ?? null,\n      confidence:            parseFloat(r.confidence) || null,\n      rain_detected:         features.rain_detected         ?? null,\n      water_on_leaves:       features.water_on_leaves       ?? null,\n      cloud_cover:           features.cloud_cover           ?? null,\n      lighting_level:        features.lighting_level        ?? null,\n      shadows_present:       features.shadows_present       ?? null,\n      plant_motion_detected: features.plant_motion_detected ?? null,\n      motion_intensity:      features.motion_intensity      ?? null,\n      decision: {\n        pump: decision?.pump ?? null,\n        fan:  decision?.fan  ?? null\n      }\n    };\n  });\n\n  imagesHistory = {\n    averages_7d: {\n      confidence:            avgNum('confidence'),\n      rain_detected:         avgBool('rain_detected'),\n      water_on_leaves:       avgBool('water_on_leaves'),\n      cloud_cover:           avgMode('cloud_cover'),\n      lighting_level:        avgMode('lighting_level'),\n      shadows_present:       avgBool('shadows_present'),\n      plant_motion_detected: avgBool('plant_motion_detected'),\n      motion_intensity:      avgMode('motion_intensity')\n    },\n    decision_stats_7d: {\n      pump: decisionStats('pump'),\n      fan:  decisionStats('fan')\n    },\n    last_3_runs: last3\n  };\n}\n\n// ----------------------------------------------------------------\n// BUILD FINAL HISTORY\n// ----------------------------------------------------------------\npayload.history = {\n  runs:   runsHistory,\n  images: imagesHistory\n};\n\nreturn [{ json: payload }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        272,
+        -16
+      ],
+      "id": "f13f8516-aca9-4d98-9749-8a8a711b2b87",
+      "name": "History_Loader"
+    }
+  ],
+  "pinData": {
+    "Preliminary_Decisions": [
+      {
+        "json": {
+          "meta": {
+            "run_id": "a9b08d-b6fc4b5a25fd",
+            "triggered_at": "2026-03-27T13:38:32"
+          },
+          "location": {
+            "latitude": 36.71743830106968,
+            "longitude": 3.1542778015136723,
+            "timezone": "Africa/Algiers"
+          },
+          "crop": {
+            "type": "orange",
+            "growth_stage": "flowering",
+            "mode": "growth_priority"
+          },
+          "sensors": [
+            {
+              "type": "soil_moisture",
+              "value": null,
+              "description": null
+            },
+            {
+              "type": "temperature",
+              "value": null,
+              "description": null
+            },
+            {
+              "type": "air_humidity",
+              "value": null,
+              "description": null
+            },
+            {
+              "type": "luminosity",
+              "value": null,
+              "description": null
+            }
+          ],
+          "actuators": [
+            {
+              "type": "pump",
+              "status": "off",
+              "control_mode": "auto",
+              "classification": "KEEP-OFF",
+              "skipped": false,
+              "run": {
+                "active": false,
+                "execute_at": null,
+                "duration_minutes": null,
+                "execute_until": null
+              },
+              "re_evaluation": {
+                "active": false,
+                "skipped": false,
+                "interval": {
+                  "start": null,
+                  "end": null
+                }
+              }
+            },
+            {
+              "type": "fan",
+              "status": "off",
+              "control_mode": "semi-auto",
+              "classification": "KEEP-OFF",
+              "skipped": false,
+              "recommended_action": null,
+              "run": {
+                "active": false,
+                "execute_at": null,
+                "duration_minutes": null,
+                "execute_until": null
+              },
+              "re_evaluation": {
+                "active": false,
+                "skipped": false,
+                "interval": {
+                  "start": null,
+                  "end": null
+                }
+              }
+            }
+          ],
+          "notifications": null,
+          "warnings": [
+            {
+              "name": "frost_risk",
+              "active": false,
+              "severity": null,
+              "description": null
+            },
+            {
+              "name": "heavy_rainfall",
+              "active": false,
+              "severity": null,
+              "description": null
+            },
+            {
+              "name": "high_humidity_level",
+              "active": false,
+              "severity": null,
+              "description": null
+            },
+            {
+              "name": "high_temperature_detected",
+              "active": false,
+              "severity": null,
+              "description": null
+            },
+            {
+              "name": "insufficient_sunlight",
+              "active": false,
+              "severity": null,
+              "description": null
+            },
+            {
+              "name": "excessive_sunlight",
+              "active": false,
+              "severity": null,
+              "description": null
+            },
+            {
+              "name": "low_soil_moisture",
+              "active": false,
+              "severity": null,
+              "description": null
+            },
+            {
+              "name": "overwatering",
+              "active": false,
+              "severity": null,
+              "description": null
+            },
+            {
+              "name": "strong_wind",
+              "active": false,
+              "severity": null,
+              "description": null
+            }
+          ],
+          "recommendation": null,
+          "weather": {
+            "precipitation_probability": null,
+            "state": null,
+            "summary": null
+          },
+          "history": {
+            "runs": null,
+            "images": null
+          },
+          "image_processing": {
+            "summary": null,
+            "features": {
+              "rain_detected": null,
+              "water_on_leaves": null,
+              "cloud_cover": null,
+              "lighting_level": null,
+              "shadows_present": null,
+              "plant_motion_detected": null,
+              "motion_intensity": null
+            },
+            "confidence": null
+          }
+        }
+      }
+    ]
+  },
+  "connections": {
+    "Preliminary_Decisions": {
+      "main": [
+        [
+          {
+            "node": "Wait Both",
+            "type": "main",
+            "index": 1
+          },
+          {
+            "node": "runs history",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "images history",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "images history": {
+      "main": [
+        [
+          {
+            "node": "Wait Both",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "runs history": {
+      "main": [
+        [
+          {
+            "node": "Wait Both",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait Both": {
+      "main": [
+        [
+          {
+            "node": "History_Loader",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "73c8b51b-641a-485c-96d6-f17ef2585103",
+  "meta": {
+    "instanceId": "af73889df6e41fa948c9be83dfce5dd763c977531265542df4d02721aa9d9365"
+  },
+  "id": "7mVowAFObwjjZl34",
+  "tags": []
+}

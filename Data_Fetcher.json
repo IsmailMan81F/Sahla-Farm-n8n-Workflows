@@ -1,0 +1,85 @@
+{
+  "name": "Data_Fetcher",
+  "nodes": [
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        560,
+        -32
+      ],
+      "id": "35195e14-9a9c-4b56-8ba0-12d050538485",
+      "name": "Timer Trigger"
+    },
+    {
+      "parameters": {
+        "url": "=http://192.168.100.34:8123/api/states",
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "{\n        \"Authorization\": \"Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJkNWE1ZDVjMzQyNTE0MzE4YjI0MTI1NjZiOTNlOWEzNiIsImlhdCI6MTc3MTkzMDY5MCwiZXhwIjoyMDg3MjkwNjkwfQ.obmGhZBspOzi-72YyCCsca-qiL8w5sNgPnHnJJmZL94\",\n        \"Content-Type\": \"application/json\"\n      }",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        784,
+        -32
+      ],
+      "id": "41676f59-4c6b-4c82-baf7-8fdc1f5c165c",
+      "name": "Fetch entites from HA"
+    },
+    {
+      "parameters": {
+        "jsCode": "const entities = items.map(i => i.json);\nconst byId = (id) => entities.find(e => e.entity_id === id);\n\n// ─── Helpers ─────────────────────────────────────────────────────────────────\n\nfunction randomRunId() {\n  const hex = () => Math.floor(Math.random() * 0xffffff).toString(16).padStart(6, '0');\n  return `${hex()}-${Math.floor(Math.random() * 0xffffffffffff).toString(16).padStart(12, '0')}`;\n}\n\nfunction toISO(datetimeStr) {\n  if (!datetimeStr || datetimeStr === 'unknown') return null;\n  return new Date(datetimeStr.replace(' ', 'T') + 'Z');\n}\n\nfunction formatTime(date) {\n  if (!date) return null;\n  const hh = String(date.getUTCHours()).padStart(2, '0');\n  const mm = String(date.getUTCMinutes()).padStart(2, '0');\n  return `${hh}:${mm}`;\n}\n\nfunction diffMinutes(from, to) {\n  if (!from || !to) return null;\n  return Math.round((to - from) / 60000);\n}\n\n// ✅ Safe parsing for real sensors\nfunction safeParse(value) {\n  if (value === null || value === undefined) return null;\n  if (value === 'unknown' || value === 'unavailable') return null;\n\n  const num = parseFloat(value);\n  return isNaN(num) ? null : num;\n}\n\nconst now = new Date();\n\n// ─── Entity lookups ───────────────────────────────────────────────────────────\n\nconst zone         = byId('zone.home');\nconst cropType     = byId('input_text.crop_type');\nconst growthStage  = byId('input_text.growth_stage');\nconst priorityMode = byId('input_select.priority_mode');\n\n// ✅ Real sensor entities\nconst soilMoisture = byId('sensor.soil_moisture');\nconst temperature  = byId('sensor.temperature');\nconst airHumidity  = byId('sensor.air_humidity');\nconst luminosity   = byId('sensor.luminosity');\n\nconst isAuto     = (mode) => mode && mode.toLowerCase().startsWith('auto');\nconst isSemiAuto = (mode) => mode && mode.toLowerCase().startsWith('semi');\n\n// ─── Actuator builder ─────────────────────────────────────────────────────────\n\nfunction buildActuator(type) {\n  const controlModeRaw = byId(`input_select.${type}_control_mode`)?.state ?? null;\n  const status         = byId(`input_boolean.${type}_status`)?.state ?? null;\n\n  const executeAtDate    = toISO(byId(`input_datetime.${type}_excecute_at`)?.state);\n  const executeUntilDate = toISO(byId(`input_datetime.${type}_excecute_until`)?.state);\n  const reEvalStartDate  = toISO(byId(`input_datetime.${type}_re_evaluation_start`)?.state);\n  const reEvalEndDate    = toISO(byId(`input_datetime.${type}_re_evaluation_end`)?.state);\n\n  const executeAtStr    = formatTime(executeAtDate);\n  const executeUntilStr = formatTime(executeUntilDate);\n\n  const reEvalExpired  = reEvalEndDate && now > reEvalEndDate;\n  const reEvalStartStr = reEvalExpired ? null : formatTime(reEvalStartDate);\n  const reEvalEndStr   = reEvalExpired ? null : formatTime(reEvalEndDate);\n\n  let controlMode;\n  if (isAuto(controlModeRaw))          controlMode = 'auto';\n  else if (isSemiAuto(controlModeRaw)) controlMode = 'semi-auto';\n  else                                 controlMode = controlModeRaw;\n\n  const isFutureReEval = !reEvalExpired && reEvalStartDate && now < reEvalStartDate;\n\n  if (isFutureReEval) {\n    return {\n      type,\n      status,\n      control_mode: controlMode,\n      classification: 'FUTURE-RE-EVALUATING',\n      skipped: true,\n      ...(isSemiAuto(controlModeRaw) ? { recommended_action: null } : {}),\n      run: { active: false, execute_at: null, duration_minutes: null, execute_until: null },\n      re_evaluation: {\n        active: true,\n        skipped: true,\n        interval: { start: reEvalStartStr, end: reEvalEndStr }\n      }\n    };\n  }\n\n  if (isAuto(controlModeRaw)) {\n    const executeUntilExpired = !executeUntilDate || now > executeUntilDate;\n\n    if (executeUntilExpired) {\n      return {\n        type,\n        status,\n        control_mode: controlMode,\n        classification: 'FREE',\n        skipped: false,\n        run: { active: false, execute_at: null, duration_minutes: null, execute_until: null },\n        re_evaluation: { active: false, skipped: false, interval: { start: null, end: null } }\n      };\n    }\n\n    const duration = diffMinutes(executeAtDate, executeUntilDate);\n\n    if (executeAtDate && now < executeAtDate) {\n      return {\n        type,\n        status,\n        control_mode: controlMode,\n        classification: 'PENDING',\n        skipped: true,\n        run: {\n          active: true,\n          execute_at: executeAtStr,\n          duration_minutes: duration,\n          execute_until: executeUntilStr\n        },\n        re_evaluation: { active: false, skipped: false, interval: { start: reEvalStartStr, end: reEvalEndStr } }\n      };\n    } else {\n      return {\n        type,\n        status,\n        control_mode: controlMode,\n        classification: 'WORKING',\n        skipped: true,\n        run: {\n          active: true,\n          execute_at: executeAtStr,\n          duration_minutes: duration,\n          execute_until: executeUntilStr\n        },\n        re_evaluation: { active: false, skipped: false, interval: { start: reEvalStartStr, end: reEvalEndStr } }\n      };\n    }\n  }\n\n  if (isSemiAuto(controlModeRaw)) {\n    return {\n      type,\n      status,\n      control_mode: controlMode,\n      classification: status === 'on' ? 'ON' : 'OFF',\n      skipped: false,\n      recommended_action: null,\n      run: { active: false, execute_at: null, duration_minutes: null, execute_until: null },\n      re_evaluation: { active: false, skipped: false, interval: { start: null, end: null } }\n    };\n  }\n\n  return {\n    type,\n    status,\n    control_mode: controlMode,\n    classification: null,\n    skipped: false,\n    run: { active: false, execute_at: null, duration_minutes: null, execute_until: null },\n    re_evaluation: { active: false, skipped: false, interval: { start: null, end: null } }\n  };\n}\n\n// ─── Warnings ─────────────────────────────────────────────────────────────────\n\nconst warningKeys = [\n  'frost_risk',\n  'heavy_rainfall',\n  'high_humidity_level',\n  'high_temperature_detected',\n  'insufficient_sunlight',\n  'excessive_sunlight',\n  'low_soil_moisture',\n  'overwatering',\n  'strong_wind'\n];\n\nconst warnings = warningKeys.map(key => ({\n  name: key,\n  active: false,\n  severity: null,\n  description: null\n}));\n\n// ─── Build actuators ──────────────────────────────────────────────────────────\n\nconst pumpActuator = buildActuator('pump');\nconst fanActuator  = buildActuator('fan');\n\n// ─── Assemble output ──────────────────────────────────────────────────────────\n\nconst output = {\n  meta: {\n    run_id: randomRunId(),\n    triggered_at: now.toISOString().slice(0, 19)\n  },\n  location: {\n    latitude:  zone?.attributes?.latitude  ?? null,\n    longitude: zone?.attributes?.longitude ?? null,\n    timezone:  'Africa/Algiers'\n  },\n  crop: {\n    type:         cropType?.state     ?? null,\n    growth_stage: growthStage?.state  ?? null,\n    mode:         priorityMode?.state ?? null\n  },\n  sensors: [\n    { type: 'soil_moisture', value: safeParse(soilMoisture?.state), description: null },\n    { type: 'temperature',   value: safeParse(temperature?.state),  description: null },\n    { type: 'air_humidity',  value: safeParse(airHumidity?.state),  description: null },\n    { type: 'luminosity',    value: safeParse(luminosity?.state),   description: null }\n  ],\n  actuators: [pumpActuator, fanActuator],\n  notifications: null,\n  warnings,\n  recommendation: null,\n  weather: {\n    precipitation_probability: null,\n    state: null,\n    summary: null\n  },\n  history: {\n    runs: null,\n    images: null\n  },\n  image_processing: {\n    summary: null,\n    features: {\n      rain_detected: null,\n      water_on_leaves: null,\n      cloud_cover: null,\n      lighting_level: null,\n      shadows_present: null,\n      plant_motion_detected: null,\n      motion_intensity: null\n    },\n    confidence: null\n  }\n};\n\nreturn [{ json: output }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1008,
+        -32
+      ],
+      "id": "14520aad-5f28-451d-bd93-20be9f9af7dc",
+      "name": "Create the main json"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Timer Trigger": {
+      "main": [
+        [
+          {
+            "node": "Fetch entites from HA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch entites from HA": {
+      "main": [
+        [
+          {
+            "node": "Create the main json",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "80833dd6-0ced-4f76-b064-d721a2bd9fe4",
+  "meta": {
+    "instanceId": "af73889df6e41fa948c9be83dfce5dd763c977531265542df4d02721aa9d9365"
+  },
+  "id": "wpuEpmHB2PoB6chV",
+  "tags": []
+}

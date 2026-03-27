@@ -1,0 +1,533 @@
+{
+  "name": "Full_Workflow",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        1344,
+        64
+      ],
+      "id": "12a71e32-bc95-4f18-91d0-bd9bc225e450",
+      "name": "Decisions + Image results"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "wpuEpmHB2PoB6chV",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/wpuEpmHB2PoB6chV",
+          "cachedResultName": "Data_Fetcher"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        224,
+        64
+      ],
+      "id": "33ae7c92-b779-48be-b930-71930d764703",
+      "name": "Data_Fetcher"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "cAYa0IliTa0TJW82",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/cAYa0IliTa0TJW82",
+          "cachedResultName": "Preliminary_Decisions"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        448,
+        64
+      ],
+      "id": "57dfb2c9-acb0-4fbb-82cd-23446b21015a",
+      "name": "Preliminary_Decisions"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "7mVowAFObwjjZl34",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/7mVowAFObwjjZl34",
+          "cachedResultName": "History_Loader"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        672,
+        64
+      ],
+      "id": "25478330-e3f1-4825-b026-b4770d60c4f6",
+      "name": "History_Loader"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "IaLeiaKNSI9i1Nbn",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/IaLeiaKNSI9i1Nbn",
+          "cachedResultName": "Weather_Fetcher"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        896,
+        64
+      ],
+      "id": "b6332589-30a6-47ec-8db2-c1e02b2d7457",
+      "name": "Weather_Fetcher"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "qFMw2YUDu6sMxGvc",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/qFMw2YUDu6sMxGvc",
+          "cachedResultName": "Image_Processing"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        1120,
+        144
+      ],
+      "id": "7d4c7f50-4a56-4263-89b0-c3d1c397091d",
+      "name": "Image_Processing"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "JpvsVRcZobHZN0N4",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/JpvsVRcZobHZN0N4",
+          "cachedResultName": "Final_Decisions"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        1568,
+        64
+      ],
+      "id": "b8d47e81-5df0-49c1-ac99-bd9b083c9fee",
+      "name": "Final_Decisions"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "wOvHHwZlxxkdY8jE",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/wOvHHwZlxxkdY8jE",
+          "cachedResultName": "Sensors_Updater"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        1792,
+        64
+      ],
+      "id": "cea237b7-0867-412e-bfd5-5d5b4564acea",
+      "name": "Sensors_Updater"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "SEV1S7fRSsZm5nth",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/SEV1S7fRSsZm5nth",
+          "cachedResultName": "Warnings_Updater"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        2016,
+        64
+      ],
+      "id": "cb731526-253a-4a28-b6dc-1fef8b49e568",
+      "name": "Warnings_Updater"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "jr3MhV1ldzACI30F",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/jr3MhV1ldzACI30F",
+          "cachedResultName": "Notifications_Manager"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        2240,
+        64
+      ],
+      "id": "3fbdc4a8-4432-444b-8639-7790b762bbe9",
+      "name": "Notifications_Manager"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "hHg6kjoNO1mzrYoZ",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/hHg6kjoNO1mzrYoZ",
+          "cachedResultName": "Data_Sender"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        2464,
+        64
+      ],
+      "id": "1a7440d9-d791-48a5-8865-d84a337af625",
+      "name": "Data_Sender"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "JbhNS2CrEqnixUtT",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/JbhNS2CrEqnixUtT",
+          "cachedResultName": "History_Logger_Runs"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        2464,
+        256
+      ],
+      "id": "98388d46-db8c-4dde-8228-191c1bbc2ee1",
+      "name": "History_Logger_Runs"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "1rUwOybSr9IFDnT0",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/1rUwOybSr9IFDnT0",
+          "cachedResultName": "History_Logger_Images"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        2464,
+        -128
+      ],
+      "id": "6c51f595-cf69-4018-8f42-ea1b9e5c09ea",
+      "name": "History_Logger_Images"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 10
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        0,
+        64
+      ],
+      "id": "d5ef7274-c283-47f5-b431-eeeba56d94a2",
+      "name": "Timer Trigger"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Decisions + Image results": {
+      "main": [
+        [
+          {
+            "node": "Final_Decisions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Data_Fetcher": {
+      "main": [
+        [
+          {
+            "node": "Preliminary_Decisions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preliminary_Decisions": {
+      "main": [
+        [
+          {
+            "node": "History_Loader",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "History_Loader": {
+      "main": [
+        [
+          {
+            "node": "Weather_Fetcher",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Weather_Fetcher": {
+      "main": [
+        [
+          {
+            "node": "Image_Processing",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Decisions + Image results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Image_Processing": {
+      "main": [
+        [
+          {
+            "node": "Decisions + Image results",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Final_Decisions": {
+      "main": [
+        [
+          {
+            "node": "Sensors_Updater",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sensors_Updater": {
+      "main": [
+        [
+          {
+            "node": "Warnings_Updater",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Warnings_Updater": {
+      "main": [
+        [
+          {
+            "node": "Notifications_Manager",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notifications_Manager": {
+      "main": [
+        [
+          {
+            "node": "History_Logger_Images",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "History_Logger_Runs",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Data_Sender",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "History_Logger_Runs": {
+      "main": [
+        []
+      ]
+    },
+    "History_Logger_Images": {
+      "main": [
+        []
+      ]
+    },
+    "Timer Trigger": {
+      "main": [
+        [
+          {
+            "node": "Data_Fetcher",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "dfd393af-41f6-43fd-950d-fd5c041ed2ff",
+  "meta": {
+    "instanceId": "af73889df6e41fa948c9be83dfce5dd763c977531265542df4d02721aa9d9365"
+  },
+  "id": "Xly6hRWXaJk3aarA",
+  "tags": []
+}

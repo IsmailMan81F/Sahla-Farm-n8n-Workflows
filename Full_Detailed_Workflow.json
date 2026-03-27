@@ -1,0 +1,1338 @@
+{
+  "name": "Full_Detailed_Workflow",
+  "nodes": [
+    {
+      "parameters": {
+        "model": "openai/gpt-oss-safeguard-20b",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        -4120,
+        624
+      ],
+      "id": "7a4a52d3-c57f-49cf-bf07-f4ffd1df9e0c",
+      "name": "Groq Chat Model",
+      "credentials": {
+        "groqApi": {
+          "id": "3DqNTy9hnqdhKooY",
+          "name": "Groq account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": "openai/gpt-3.5-turbo",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [
+        -2648,
+        624
+      ],
+      "id": "3376b53d-9c14-4c80-9ad4-245e83b41816",
+      "name": "OpenRouter Chat Model",
+      "credentials": {
+        "openRouterApi": {
+          "id": "SVCsLYABo0HNsCaE",
+          "name": "OpenRouter account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": "openai/gpt-oss-safeguard-20b",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        -1176,
+        624
+      ],
+      "id": "2ee0177a-cf82-41c8-914d-7db9aa627edb",
+      "name": "Groq Chat Model1",
+      "credentials": {
+        "groqApi": {
+          "id": "w2kySJjiKQ2jRWG1",
+          "name": "Groq account 3"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -5088,
+        400
+      ],
+      "id": "7a845d3c-45a7-49ac-869c-1800800fdbcb",
+      "name": "Schedule Trigger1"
+    },
+    {
+      "parameters": {
+        "jsCode": "const decisions = JSON.parse(items[0].json.output);\nconst mainJson = $('Payload_Builder').first().json;\n\n// Map decisions by type for safe lookup\nconst decisionMap = {};\ndecisions.forEach(d => {\n  decisionMap[d.type.toLowerCase()] = d.decision;\n});\n\n// Apply classifications back onto the main json actuators\nconst updatedActuators = mainJson.actuators.map(a => {\n  const decision = decisionMap[a.type.toLowerCase()];\n\n  if (!decision) return a; // no decision found, leave untouched\n\n  if (a.control_mode === 'auto') {\n    return {\n      ...a,\n      classification: decision === 'TURN ON' ? 'TURN-ON' : 'KEEP-OFF'\n    };\n  }\n\n  if (a.control_mode === 'semi-auto') {\n    const status   = a.status.toLowerCase();\n    const deciding = decision.toLowerCase();\n\n    let classification;\n    if      (status === 'off' && deciding === 'turn on')  classification = 'TURN-ON';\n    else if (status === 'on'  && deciding === 'turn off') classification = 'TURN-OFF';\n    else if (status === 'off' && deciding === 'turn off') classification = 'KEEP-OFF';\n    else if (status === 'on'  && deciding === 'turn on')  classification = 'KEEP-ON';\n    else classification = a.classification; // fallback\n\n    return { ...a, classification };\n  }\n\n  return a; // fallback for unknown control mode\n});\n\nreturn [{ json: { ...mainJson, actuators: updatedActuators } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -3840,
+        400
+      ],
+      "id": "ff5eb8f5-b897-4d74-8099-c36c1fc41bc1",
+      "name": "Preliminary_Decisions"
+    },
+    {
+      "parameters": {
+        "url": "=https://api.open-meteo.com/v1/forecast?latitude={{ $json.location.latitude }}&longitude={{ $json.location.longitude }}&hourly=temperature_2m,relative_humidity_2m,precipitation_probability&forecast_days=2&timezone={{ $json.location.timezone }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -2944,
+        400
+      ],
+      "id": "1c94b8ec-0487-45ec-a338-ecbbe1bb01ce",
+      "name": "Weather_API_Call"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Analyze the following raw hourly weather data for the Algiers site over the next 48 hours:\n\nTIMESTAMPS:\n{{ JSON.stringify($json.hourly.time) }}\n\nTEMPERATURES (°C):\n{{ JSON.stringify($json.hourly.temperature_2m) }}\n\nPRECIPITATION PROBABILITY (%):\n{{ JSON.stringify($json.hourly.precipitation_probability) }}\n\nBased on this data, return a JSON object with:\n- \"summary\": a 2-4 sentence weather narrative covering atmospheric transitions, rain risks, and heat peaks\n- \"state\": the dominant weather condition, must be one of: \"sunny\", \"cloudy\", \"rainy\", \"snowy\", \"stormy\", \"foggy\"\n- \"precipitation_probability\": a single number (0-100) representing the overall precipitation risk for the next 48 hours\n\nReturn only the JSON object, nothing else.",
+        "options": {
+          "systemMessage": "You are a Meteorological Strategist specialized in agricultural weather analysis. You receive raw hourly weather data for a specific site and your job is to interpret it and return a structured JSON response.\n\n─── OUTPUT FORMAT ───────────────────────────────────────────────────\n\nYou must return ONLY a valid JSON object with exactly these three fields:\n\n{\n  \"summary\": \"...\",\n  \"state\": \"...\",\n  \"precipitation_probability\": ...\n}\n\nField rules:\n- \"summary\": a concise but insightful weather narrative for the next 48 hours, highlighting significant atmospheric transitions, immediate rain risks, and intensity of daily heat peaks. 2-4 sentences maximum.\n- \"state\": a single word representing the dominant weather condition. Must be one of: \"sunny\", \"cloudy\", \"rainy\", \"snowy\", \"stormy\", \"foggy\"\n- \"precipitation_probability\": a single number (0-100) representing the overall precipitation probability for the next 48 hours, derived from the hourly data (use the peak or average, whichever is more representative for agricultural decisions)\n\n─── STRICT OUTPUT RULES ─────────────────────────────────────────────\n\n- Return ONLY the JSON object, nothing else\n- No explanation, no commentary, no markdown, no code blocks\n- Do not add any extra fields\n- \"state\" must be exactly one of the six allowed values, lowercase"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        -2720,
+        400
+      ],
+      "id": "26b41b25-57b7-44d1-8f91-af4cfc807023",
+      "name": "Weather_Agent"
+    },
+    {
+      "parameters": {
+        "jsCode": "const mainJson = { ...( $('History_Loader').first().json ) };\nconst raw = $('Weather_Agent').first().json.output;\nconst weather = JSON.parse(raw);\nconst weatherRaw = $('Weather_API_Call').first().json;\n\nmainJson.weather.summary = weather.summary;\nmainJson.weather.state = weather.state;\nmainJson.weather.precipitation_probability = weather.precipitation_probability;\n\n// ─── Build weather insights ───────────────────────────────────────────────────\nconst times    = weatherRaw.hourly.time;\nconst temps    = weatherRaw.hourly.temperature_2m;\nconst humidity = weatherRaw.hourly.relative_humidity_2m;\nconst precip   = weatherRaw.hourly.precipitation_probability;\n\n// Find max and min temperature\nlet maxTemp = { value: -Infinity, time: null };\nlet minTemp = { value:  Infinity, time: null };\ntemps.forEach((t, i) => {\n  if (t > maxTemp.value) maxTemp = { value: t, time: times[i] };\n  if (t < minTemp.value) minTemp = { value: t, time: times[i] };\n});\n\n// Keep only every 3 hours to reduce size (48h → 16 entries)\nconst hourly = times\n  .map((t, i) => ({\n    time:                      t,\n    temperature:               temps[i],\n    humidity:                  humidity[i],\n    precipitation_probability: precip[i]\n  }))\n  .filter((_, i) => i % 3 === 0);\n\nmainJson.weather.insights = {\n  highlights: {\n    max_temperature: maxTemp,\n    min_temperature: minTemp\n  },\n  hourly\n};\n\nreturn [{ json: mainJson }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2368,
+        400
+      ],
+      "id": "c802f51e-3d29-43e5-b1be-63484567d8c8",
+      "name": "Weather_Enriched"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=CURRENT TIME:\n{{$json.time}}\nCROP INFO:\n- Type:          {{$json.crop.type}}\n- Growth stage:  {{$json.crop.growth_stage}}\n- Farm mode:     {{$json.crop.mode}}\nWEATHER:\n- State:                     {{$json.weather.state}}\n- Precipitation probability: {{$json.weather.precipitation_probability}}%\n- Summary:                   {{$json.weather.summary}}\nIMAGE PROCESSING (current):\n- Summary:          {{$json.image_processing.summary}}\n- Confidence:       {{$json.image_processing.confidence}}%\n- Rain detected:    {{$json.image_processing.features.rain_detected}}\n- Water on leaves:  {{$json.image_processing.features.water_on_leaves}}\n- Cloud cover:      {{$json.image_processing.features.cloud_cover}}\n- Lighting level:   {{$json.image_processing.features.lighting_level}}\n- Plant motion:     {{$json.image_processing.features.plant_motion_detected}}\n- Motion intensity: {{$json.image_processing.features.motion_intensity}}\nHISTORY — 7-DAY SENSOR AVERAGES:\n{{JSON.stringify($json.history.runs.averages_7d)}}\nHISTORY — WATER CONSUMPTION LAST 7 DAYS:\n{{JSON.stringify($json.history.runs.water_consumption_7d)}}\nHISTORY — LAST 3 RUNS:\n{{JSON.stringify($json.history.runs.last_runs)}}\nHISTORY — IMAGE AVERAGES 7 DAYS:\n{{JSON.stringify($json.history.images.averages_7d)}}\nHISTORY — LAST 3 IMAGES:\n{{JSON.stringify($json.history.images.last_images)}}\nACTUATORS TO SCHEDULE ({{$json.actuators.length}} total — types: {{$json.actuators.map(a => a.type).join(', ')}}):\n{{JSON.stringify($json.actuators)}}\nBased on all the above, for each of the {{$json.actuators.length}} actuator(s) ({{$json.actuators.map(a => a.type).join(', ')}}), decide: run now, delay, or flag for re-evaluation.\nReturn a single JSON object with exactly two fields: actuators, recommendation.\n- actuators: array of exactly {{$json.actuators.length}} object(s), same order, same types: {{$json.actuators.map(a => a.type).join(', ')}}\n- recommendation: ~170 character plain-language farm summary\nNo explanation, no extra fields, no markdown. Only the JSON object.",
+        "options": {
+          "systemMessage": "You are an expert agricultural scheduling AI. Your role is to decide, for each actuator that has been cleared for activation (TURN-ON), whether to run it immediately, delay it to a better time, or flag it for re-evaluation if the situation is too ambiguous to decide. You also provide a short farmer-friendly recommendation.\n\n─── INPUT YOU WILL RECEIVE ─────────────────────────────────────────────────────\n\n- Current time\n- Crop info (type, growth stage, farm mode)\n- Weather (summary, precipitation probability)\n- Image processing (what the camera saw: rain, wet leaves, cloud cover, etc.)\n- History (7-day sensor averages, water consumption, last 3 runs, last 3 images)\n- Actuators to schedule (only TURN-ON actuators, with their current run and re-evaluation intervals)\n\n─── IMAGE PROCESSING RULES ─────────────────────────────────────────────────────\n\nIf the image summary indicates that no image was taken or no image should be considered (e.g. \"no image to be taken into consideration\", \"no image available\", or any similar message), then:\n- Completely ignore all image processing fields\n- Do NOT use image data in your decision\n- Do NOT flag actuators for re-evaluation based on image uncertainty alone\n- Base your decision entirely on weather + history + sensor data\n\n─── YOUR DECISION FOR EACH ACTUATOR ────────────────────────────────────────────\n\nFor each actuator you receive, you must choose one of three outcomes:\n\nOUTCOME 1 — RUN NOW:\n  Conditions are favorable. Run the actuator immediately.\n  → classification: \"TURN-ON\"\n  → run.active: true\n  → run.execute_at: current time in \"HH:MM\" format\n  → run.execute_until: a future time in \"HH:MM\" format (you decide the duration)\n  → run.duration_minutes: integer (difference between execute_at and execute_until)\n  → re_evaluation.active: false\n  → re_evaluation.skipped: false\n  → re_evaluation.interval.start: null\n  → re_evaluation.interval.end: null\n\nOUTCOME 2 — DELAY:\n  Conditions are not ideal right now but will improve. Schedule for a better time.\n  → classification: \"TURN-ON\"\n  → run.active: true\n  → run.execute_at: a future time in \"HH:MM\" format (you decide when)\n  → run.execute_until: a future time in \"HH:MM\" format\n  → run.duration_minutes: integer\n  → re_evaluation.active: false\n  → re_evaluation.skipped: false\n  → re_evaluation.interval.start: null\n  → re_evaluation.interval.end: null\n\nOUTCOME 3 — NEED-RE-EVALUATION:\n  Signals are too conflicting or ambiguous to make a confident decision.\n  → classification: \"NEED-RE-EVALUATION\"\n  → run.active: false\n  → run.execute_at: null\n  → run.execute_until: null\n  → run.duration_minutes: null\n  → re_evaluation.active: true\n  → re_evaluation.skipped: false\n  → re_evaluation.interval.start: a future time \"HH:MM\" (when to re-check)\n  → re_evaluation.interval.end: a future time \"HH:MM\" (end of re-check window)\n\n─── RECOMMENDATION ─────────────────────────────────────────────────────────────\n\nWrite a single plain-language recommendation string that:\n- Summarizes the overall farm situation in farmer-friendly language\n- Mentions what actions are being taken or delayed and why\n- Is approximately 170 characters long (strict maximum 200 characters)\n- Uses no technical jargon, no JSON, no bullet points, just a natural sentence or two\n\n─── DECISION GUIDELINES ────────────────────────────────────────────────────────\n\nPUMP (irrigation):\n  - Delay or re-evaluate if: rain is coming (high precipitation probability), water already on leaves, soil visually wet from image, recent heavy irrigation in history\n  - Run now if: soil moisture is low, no rain risk, conditions are dry, crop stage demands water (e.g. flowering is critical)\n  - Consider farm mode: growth_priority = prioritize plant health, water_saver = minimize irrigation\n\nFAN (ventilation):\n  - Delay or re-evaluate if: strong wind detected in image, storm incoming, plant motion is intense\n  - Run now if: temperature is high, humidity is high, luminosity is elevated\n  - Consider time of day: running fan at night is usually unnecessary unless humidity is critical\n\nGENERAL:\n  - Always cross-reference weather + image + history together, never decide from one signal alone\n  - If image confidence is below 60, reduce its weight in your decision\n  - Respect the farm mode: growth_priority = act aggressively for plant health, energy_saver = minimize activations, water_saver = minimize pump usage, balanced = use judgment\n  - Use history averages to detect anomalies (e.g. if current soil moisture is much lower than 7d average, irrigate now)\n\n─── OUTPUT FORMAT ───────────────────────────────────────────────────────────────\n\nReturn ONLY a valid JSON object with exactly these two top-level fields:\n\n{\n  \"actuators\": [...],\n  \"recommendation\": \"...\"\n}\n\n\"actuators\" array rules:\n  - EXACTLY the same number of actuators you received, same order, same types\n  - Each object must have EXACTLY these fields: type, classification, run, re_evaluation\n  - Do not add any extra fields inside actuator objects\n  - Do not rename types, do not invent new actuators like \"pump1\" or \"fan2\"\n\n\"recommendation\" rules:\n  - A single string, ~170 characters, maximum 200\n  - Plain farmer-friendly language, no markdown, no bullet points\n\n─── STRICT OUTPUT RULES ─────────────────────────────────────────────────────────\n\n- Return ONLY the JSON object, nothing else\n- No explanation, no commentary, no markdown, no code blocks\n- All times in ISO 8601 format: \"YYYY-MM-DDTHH:MM:SS\" (e.g. \"2026-03-26T06:00:00\")\n- duration_minutes must be a positive integer when set, null otherwise\n- Before outputting, verify: does every type in actuators match exactly what you received? If not, fix it."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        -1248,
+        400
+      ],
+      "id": "e6dab613-d737-48d0-ac91-2316cfc6e6c8",
+      "name": "Final_Decider"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=CURRENT TIME:\n{{$json.time}}\n\nFARM INFO:\n- Crop type:    {{$json.crop.type}}\n- Growth stage: {{$json.crop.growth_stage}}\n- Farm mode:    {{$json.crop.mode}}\n\nSENSOR READINGS:\n- Soil moisture: {{$json.sensors[0].value}} %\n- Temperature:   {{$json.sensors[1].value}} °C\n- Air humidity:  {{$json.sensors[2].value}} %\n- Luminosity:    {{$json.sensors[3].value}} %\n\nACTUATORS ({{$json.actuators.length}} total):\n{{$json.actuators}}\n\nReturn a JSON array of exactly {{$json.actuators.length}} decision(s), one per actuator, same order.\nOnly output the array, nothing else.\n\nIMPORTANT: You received {{$json.actuators.length}} actuator(s): {{$json.actuators.map(a => a.type).join(', ')}}.\nReturn EXACTLY {{$json.actuators.length}} decision(s), only for these types: {{$json.actuators.map(a => a.type).join(', ')}}.\nAny other type in your output is a critical error.\n\nAllowed decision values:\n  - All actuators → \"TURN ON\" or \"TURN OFF\"",
+        "options": {
+          "systemMessage": "You are an expert agricultural AI. Your ONLY job is to decide whether to activate or deactivate each actuator based on the farm data you receive.\n\n─── DECISION GUIDELINES ────────────────────────────────────────────\n\nPUMP (irrigation):\n  - Turn ON if soil_moisture is low relative to the crop and growth stage needs\n  - Turn OFF if soil_moisture is already sufficient or high\n  - Consider temperature and air_humidity: high temperature + low humidity = more water needed\n  - Consider the crop type and growth stage (e.g. flowering stage is critical for water)\n\nFAN (ventilation):\n  - Turn ON if temperature is too high or air_humidity is too high for the crop\n  - Turn ON if luminosity is very high and temperature is already elevated\n  - Turn OFF if temperature and humidity are within acceptable range for the crop and growth stage\n\nAlways factor in:\n  - The farm mode (e.g. growth_priority = prioritize plant health over energy saving)\n  - The crop type and its known agronomic thresholds\n  - The current time (avoid unnecessary irrigation at peak sun hours, etc.)\n  - The combination of all sensor values together, not each in isolation\n\n─── OUTPUT RULES ───────────────────────────────────────────────────\n\nReturn ONLY a valid JSON array of decisions, one object per actuator, in the exact same order you received them.\nEach object must have exactly two fields: \"type\" and \"decision\".\nNo explanation, no commentary, no markdown, no code blocks.\n\nAllowed decision values for all actuators:\n  - \"TURN ON\"\n  - \"TURN OFF\"\n\nExample output format:\n[{\"type\": \"pump\", \"decision\": \"TURN ON\"}, {\"type\": \"fan\", \"decision\": \"TURN OFF\"}]\n\n─── STRICT ACTUATOR CONSTRAINT ───────────────────────────────────────\n\nYou will receive a list of actuators. Count them before doing anything.\nYou must return EXACTLY that number of decisions, for EXACTLY those types you received.\nNever invent actuators that were not in your input.\nBefore outputting, verify: does every type in your output exist in your input? If not, remove it."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        -4192,
+        400
+      ],
+      "id": "296fd722-d0a3-4da5-b105-3b060d34d2ff",
+      "name": "Pre_Decider"
+    },
+    {
+      "parameters": {
+        "model": "openai/gpt-oss-safeguard-20b",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        -376,
+        624
+      ],
+      "id": "273a1d25-a8e2-4ecb-a53f-c464d2583ef1",
+      "name": "Groq Chat Model3",
+      "credentials": {
+        "groqApi": {
+          "id": "w2kySJjiKQ2jRWG1",
+          "name": "Groq account 3"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "return [\n  {\n    \"summary\": \"Heavy rainfall has left the soil and leaves visibly wet; cloud coverage is high, blocking the sun; shadows are present despite low lighting; plants show moderate motion due to wind.\",\n    \"features\": {\n      \"rain_detected\": true,\n      \"water_on_leaves\": true,\n      \"cloud_cover\": \"high\",\n      \"lighting_level\": \"low\",\n      \"shadows_present\": true,\n      \"plant_motion_detected\": true,\n      \"motion_intensity\": \"moderate\"\n    },\n    \"confidence\": 93\n  }\n]\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2144,
+        472
+      ],
+      "id": "7a09d85c-6054-49ad-9a57-a96a8abd8710",
+      "name": "Image Processing"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        -1920,
+        400
+      ],
+      "id": "e5cc8ee1-744d-4e71-9a01-aefc623af11a",
+      "name": "Decisions + Image results"
+    },
+    {
+      "parameters": {
+        "jsCode": "const allItems = $input.all().map(i => i.json);\n\nconst mainJson = allItems.find(i => i.meta !== undefined);\nconst image    = allItems.find(i => i.summary !== undefined);\n\nif (image) {\n  mainJson.image_processing.summary    = image.summary    ?? null;\n  mainJson.image_processing.confidence = image.confidence ?? null;\n  mainJson.image_processing.features   = image.features   ?? mainJson.image_processing.features;\n}\n\nreturn [{ json: mainJson }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1696,
+        400
+      ],
+      "id": "9d9f47e7-bf8c-4dd5-b95e-8b2830654457",
+      "name": "Merge the results"
+    },
+    {
+      "parameters": {
+        "jsCode": "const entities = items.map(i => i.json);\nconst byId = (id) => entities.find(e => e.entity_id === id);\n\n// ─── Helpers ─────────────────────────────────────────────────────────────────\n\nfunction randomRunId() {\n  const hex = () => Math.floor(Math.random() * 0xffffff).toString(16).padStart(6, '0');\n  return `${hex()}-${Math.floor(Math.random() * 0xffffffffffff).toString(16).padStart(12, '0')}`;\n}\n\nfunction toISO(datetimeStr) {\n  if (!datetimeStr || datetimeStr === 'unknown') return null;\n  return new Date(datetimeStr.replace(' ', 'T') + 'Z');\n}\n\nfunction formatTime(date) {\n  if (!date) return null;\n  const hh = String(date.getUTCHours()).padStart(2, '0');\n  const mm = String(date.getUTCMinutes()).padStart(2, '0');\n  return `${hh}:${mm}`;\n}\n\nfunction diffMinutes(from, to) {\n  if (!from || !to) return null;\n  return Math.round((to - from) / 60000);\n}\n\n// ✅ Safe parsing for real sensors\nfunction safeParse(value) {\n  if (value === null || value === undefined) return null;\n  if (value === 'unknown' || value === 'unavailable') return null;\n\n  const num = parseFloat(value);\n  return isNaN(num) ? null : num;\n}\n\nconst now = new Date();\n\n// ─── Entity lookups ───────────────────────────────────────────────────────────\n\nconst zone         = byId('zone.home');\nconst cropType     = byId('input_text.crop_type');\nconst growthStage  = byId('input_text.growth_stage');\nconst priorityMode = byId('input_select.priority_mode');\n\n// ✅ Real sensor entities\nconst soilMoisture = byId('sensor.soil_moisture');\nconst temperature  = byId('sensor.temperature');\nconst airHumidity  = byId('sensor.air_humidity');\nconst luminosity   = byId('sensor.luminosity');\n\nconst isAuto     = (mode) => mode && mode.toLowerCase().startsWith('auto');\nconst isSemiAuto = (mode) => mode && mode.toLowerCase().startsWith('semi');\n\n// ─── Actuator builder ─────────────────────────────────────────────────────────\n\nfunction buildActuator(type) {\n  const controlModeRaw = byId(`input_select.${type}_control_mode`)?.state ?? null;\n  const status         = byId(`input_boolean.${type}_status`)?.state ?? null;\n\n  const executeAtDate    = toISO(byId(`input_datetime.${type}_excecute_at`)?.state);\n  const executeUntilDate = toISO(byId(`input_datetime.${type}_excecute_until`)?.state);\n  const reEvalStartDate  = toISO(byId(`input_datetime.${type}_re_evaluation_start`)?.state);\n  const reEvalEndDate    = toISO(byId(`input_datetime.${type}_re_evaluation_end`)?.state);\n\n  const executeAtStr    = formatTime(executeAtDate);\n  const executeUntilStr = formatTime(executeUntilDate);\n\n  const reEvalExpired  = reEvalEndDate && now > reEvalEndDate;\n  const reEvalStartStr = reEvalExpired ? null : formatTime(reEvalStartDate);\n  const reEvalEndStr   = reEvalExpired ? null : formatTime(reEvalEndDate);\n\n  let controlMode;\n  if (isAuto(controlModeRaw))          controlMode = 'auto';\n  else if (isSemiAuto(controlModeRaw)) controlMode = 'semi-auto';\n  else                                 controlMode = controlModeRaw;\n\n  const isFutureReEval = !reEvalExpired && reEvalStartDate && now < reEvalStartDate;\n\n  if (isFutureReEval) {\n    return {\n      type,\n      status,\n      control_mode: controlMode,\n      classification: 'FUTURE-RE-EVALUATING',\n      skipped: true,\n      ...(isSemiAuto(controlModeRaw) ? { recommended_action: null } : {}),\n      run: { active: false, execute_at: null, duration_minutes: null, execute_until: null },\n      re_evaluation: {\n        active: true,\n        skipped: true,\n        interval: { start: reEvalStartStr, end: reEvalEndStr }\n      }\n    };\n  }\n\n  if (isAuto(controlModeRaw)) {\n    const executeUntilExpired = !executeUntilDate || now > executeUntilDate;\n\n    if (executeUntilExpired) {\n      return {\n        type,\n        status,\n        control_mode: controlMode,\n        classification: 'FREE',\n        skipped: false,\n        run: { active: false, execute_at: null, duration_minutes: null, execute_until: null },\n        re_evaluation: { active: false, skipped: false, interval: { start: null, end: null } }\n      };\n    }\n\n    const duration = diffMinutes(executeAtDate, executeUntilDate);\n\n    if (executeAtDate && now < executeAtDate) {\n      return {\n        type,\n        status,\n        control_mode: controlMode,\n        classification: 'PENDING',\n        skipped: true,\n        run: {\n          active: true,\n          execute_at: executeAtStr,\n          duration_minutes: duration,\n          execute_until: executeUntilStr\n        },\n        re_evaluation: { active: false, skipped: false, interval: { start: reEvalStartStr, end: reEvalEndStr } }\n      };\n    } else {\n      return {\n        type,\n        status,\n        control_mode: controlMode,\n        classification: 'WORKING',\n        skipped: true,\n        run: {\n          active: true,\n          execute_at: executeAtStr,\n          duration_minutes: duration,\n          execute_until: executeUntilStr\n        },\n        re_evaluation: { active: false, skipped: false, interval: { start: reEvalStartStr, end: reEvalEndStr } }\n      };\n    }\n  }\n\n  if (isSemiAuto(controlModeRaw)) {\n    return {\n      type,\n      status,\n      control_mode: controlMode,\n      classification: status === 'on' ? 'ON' : 'OFF',\n      skipped: false,\n      recommended_action: null,\n      run: { active: false, execute_at: null, duration_minutes: null, execute_until: null },\n      re_evaluation: { active: false, skipped: false, interval: { start: null, end: null } }\n    };\n  }\n\n  return {\n    type,\n    status,\n    control_mode: controlMode,\n    classification: null,\n    skipped: false,\n    run: { active: false, execute_at: null, duration_minutes: null, execute_until: null },\n    re_evaluation: { active: false, skipped: false, interval: { start: null, end: null } }\n  };\n}\n\n// ─── Warnings ─────────────────────────────────────────────────────────────────\n\nconst warningKeys = [\n  'frost_risk',\n  'heavy_rainfall',\n  'high_humidity_level',\n  'high_temperature_detected',\n  'insufficient_sunlight',\n  'excessive_sunlight',\n  'low_soil_moisture',\n  'overwatering',\n  'strong_wind'\n];\n\nconst warnings = warningKeys.map(key => ({\n  name: key,\n  active: false,\n  severity: null,\n  description: null\n}));\n\n// ─── Build actuators ──────────────────────────────────────────────────────────\n\nconst pumpActuator = buildActuator('pump');\nconst fanActuator  = buildActuator('fan');\n\n// ─── Assemble output ──────────────────────────────────────────────────────────\n\nconst output = {\n  meta: {\n    run_id: randomRunId(),\n    triggered_at: now.toISOString().slice(0, 19)\n  },\n  location: {\n    latitude:  zone?.attributes?.latitude  ?? null,\n    longitude: zone?.attributes?.longitude ?? null,\n    timezone:  'Africa/Algiers'\n  },\n  crop: {\n    type:         cropType?.state     ?? null,\n    growth_stage: growthStage?.state  ?? null,\n    mode:         priorityMode?.state ?? null\n  },\n  sensors: [\n    { type: 'soil_moisture', value: safeParse(soilMoisture?.state), description: null },\n    { type: 'temperature',   value: safeParse(temperature?.state),  description: null },\n    { type: 'air_humidity',  value: safeParse(airHumidity?.state),  description: null },\n    { type: 'luminosity',    value: safeParse(luminosity?.state),   description: null }\n  ],\n  actuators: [pumpActuator, fanActuator],\n  notifications: null,\n  warnings,\n  recommendation: null,\n  weather: {\n    precipitation_probability: null,\n    state: null,\n    summary: null\n  },\n  history: {\n    runs: null,\n    images: null\n  },\n  image_processing: {\n    summary: null,\n    features: {\n      rain_detected: null,\n      water_on_leaves: null,\n      cloud_cover: null,\n      lighting_level: null,\n      shadows_present: null,\n      plant_motion_detected: null,\n      motion_intensity: null\n    },\n    confidence: null\n  }\n};\n\nreturn [{ json: output }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -4640,
+        400
+      ],
+      "id": "e70f202d-a435-43a1-9992-5cf9bd8449a2",
+      "name": "Payload_Builder"
+    },
+    {
+      "parameters": {
+        "url": "=http://192.168.100.34:8123/api/states",
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "{\n        \"Authorization\": \"Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJkNWE1ZDVjMzQyNTE0MzE4YjI0MTI1NjZiOTNlOWEzNiIsImlhdCI6MTc3MTkzMDY5MCwiZXhwIjoyMDg3MjkwNjkwfQ.obmGhZBspOzi-72YyCCsca-qiL8w5sNgPnHnJJmZL94\",\n        \"Content-Type\": \"application/json\"\n      }",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -4864,
+        400
+      ],
+      "id": "6ac3f594-676e-4285-bca1-9ece8a08483d",
+      "name": "Data_Fetcher"
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = items[0].json;\n\n// ─── Helpers ──────────────────────────────────────────────────────────────────\n\nfunction shouldIncludeActuator(actuator) {\n  if (actuator.control_mode === 'auto')      return actuator.skipped === false;\n  if (actuator.control_mode === 'semi-auto') return actuator.classification !== 'FUTURE-RE-EVALUATING';\n  return false;\n}\n\n// ─── Filter actuators first ───────────────────────────────────────────────────\n\nconst filteredActuators = (input.actuators ?? [])\n  .filter(shouldIncludeActuator)\n  .map(a => ({\n    type:           a.type,\n    status:         a.status,\n    control_mode:   a.control_mode,\n    classification: a.classification\n  }));\n\n// ─── Stop if no actuators passed the filter ───────────────────────────────────\n\nif (filteredActuators.length === 0) {\n  return null;\n}\n\n// ─── Filter & reshape ─────────────────────────────────────────────────────────\n\nconst output = {\n  time: input.meta?.triggered_at ?? null,\n  farm: input.farm ?? null,\n  sensors: (input.sensors ?? []).map(s => ({\n    name:  s.name,\n    value: s.value\n  })),\n  actuators: filteredActuators\n};\n\nreturn [{ json: output }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -4416,
+        400
+      ],
+      "id": "d149e974-98e9-4bbb-8335-39ded74f871a",
+      "name": "Filter actuators + important data only"
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1hhZUzb_vaXrBVv_pv6G0IfiqtxUKAwfNxYkqOXD93f0",
+          "mode": "list",
+          "cachedResultName": "sahla_farm",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1hhZUzb_vaXrBVv_pv6G0IfiqtxUKAwfNxYkqOXD93f0/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 383692769,
+          "mode": "list",
+          "cachedResultName": "image_runs",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1hhZUzb_vaXrBVv_pv6G0IfiqtxUKAwfNxYkqOXD93f0/edit#gid=383692769"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        -3616,
+        544
+      ],
+      "id": "f526b79f-a697-4505-b03e-15db03d501d9",
+      "name": "images history",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "E8fQO14Ggb744oak",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1hhZUzb_vaXrBVv_pv6G0IfiqtxUKAwfNxYkqOXD93f0",
+          "mode": "list",
+          "cachedResultName": "sahla_farm",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1hhZUzb_vaXrBVv_pv6G0IfiqtxUKAwfNxYkqOXD93f0/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1909675133,
+          "mode": "list",
+          "cachedResultName": "runs",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1hhZUzb_vaXrBVv_pv6G0IfiqtxUKAwfNxYkqOXD93f0/edit#gid=1909675133"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        -3616,
+        256
+      ],
+      "id": "a866cffc-c04a-4ee0-84ea-cc029baf10bb",
+      "name": "runs history",
+      "executeOnce": false,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "E8fQO14Ggb744oak",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "numberInputs": 3
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        -3392,
+        384
+      ],
+      "id": "17f626af-650f-4cb9-84f0-ccbe32ebeed2",
+      "name": "Wait Both"
+    },
+    {
+      "parameters": {
+        "jsCode": "const allItems = $input.all().map(i => i.json);\n\n// Payload is the one that has \"meta\" field\nconst payload = allItems.find(i => i.meta !== undefined);\n\n// Runs rows — have row_number AND triggered_at but NOT timestamp\nconst rows = allItems.filter(i => i.row_number !== undefined && i.triggered_at !== undefined && i.timestamp === undefined);\n\n// Image rows — have timestamp AND summary (picture analysis rows)\nconst imageRows = allItems.filter(i => i.timestamp !== undefined && i.summary !== undefined);\n\n// ----------------------------------------------------------------\n// RUNS HISTORY\n// ----------------------------------------------------------------\nlet runsHistory = null;\n\nif (rows.length > 0) {\n  const sevenDaysAgo = new Date();\n  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);\n  const last7days = rows.filter(r => new Date(r.triggered_at) >= sevenDaysAgo);\n\n  const avg = (field) => {\n    const values = last7days.map(r => {\n      const sensors = typeof r.sensors === 'string' ? JSON.parse(r.sensors) : r.sensors;\n      return parseFloat(sensors?.[field]);\n    }).filter(v => !isNaN(v));\n    if (values.length === 0) return null;\n    return parseFloat((values.reduce((a, b) => a + b, 0) / values.length).toFixed(2));\n  };\n\n  const waterByDay = {};\n  last7days.forEach(r => {\n    const day = r.triggered_at?.slice(0, 10);\n    if (!day) return;\n    const actuators = typeof r.actuators === 'string' ? JSON.parse(r.actuators) : r.actuators;\n    const pump = Array.isArray(actuators) ? actuators.find(a => a.type === 'pump') : null;\n    const duration = parseFloat(pump?.duration_minutes) || 0;\n    waterByDay[day] = (waterByDay[day] || 0) + duration;\n  });\n\n  const water7d = Object.entries(waterByDay).map(([day, minutes]) => ({\n    day,\n    total_pump_minutes: parseFloat(minutes.toFixed(2))\n  }));\n\n  runsHistory = {\n    averages_7d: {\n      soil_moisture: avg('soil_moisture'),\n      temperature:   avg('temperature'),\n      air_humidity:  avg('air_humidity'),\n      luminosity:    avg('luminosity')\n    },\n    water_consumption_7d: water7d,\n    last_3_runs: last7days.slice(-3).map(r => {\n      const sensors   = typeof r.sensors   === 'string' ? JSON.parse(r.sensors)   : r.sensors;\n      const actuators = typeof r.actuators === 'string' ? JSON.parse(r.actuators) : r.actuators;\n      const pump = Array.isArray(actuators) ? actuators.find(a => a.type === 'pump') : null;\n      const fan  = Array.isArray(actuators) ? actuators.find(a => a.type === 'fan')  : null;\n      return {\n        triggered_at:          r.triggered_at,\n        soil_moisture:         sensors?.soil_moisture         ?? null,\n        temperature:           sensors?.temperature           ?? null,\n        air_humidity:          sensors?.air_humidity          ?? null,\n        luminosity:            sensors?.luminosity            ?? null,\n        pump_decision:         pump?.classification           ?? null,\n        pump_duration_minutes: pump?.duration_minutes         ?? null,\n        fan_decision:          fan?.classification            ?? null,\n        fan_duration_minutes:  fan?.duration_minutes          ?? null\n      };\n    })\n  };\n}\n\n// ----------------------------------------------------------------\n// IMAGE HISTORY\n// ----------------------------------------------------------------\nlet imagesHistory = null;\n\nif (imageRows.length > 0) {\n  const sevenDaysAgo = new Date();\n  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);\n  const last7daysImages = imageRows.filter(r => new Date(r.timestamp) >= sevenDaysAgo);\n\n  const parseFeatures = (raw) => {\n    if (!raw) return {};\n    if (typeof raw === 'object') return raw;\n    try { return JSON.parse(raw); } catch { return {}; }\n  };\n\n  const parseDecision = (raw) => {\n    if (!raw) return { pump: null, fan: null };\n    if (typeof raw === 'object') return raw;\n    try { return JSON.parse(raw); } catch { return { pump: null, fan: null }; }\n  };\n\n  const avgNum = (field) => {\n    const values = last7daysImages.map(r => parseFloat(r[field])).filter(v => !isNaN(v));\n    if (values.length === 0) return null;\n    return parseFloat((values.reduce((a, b) => a + b, 0) / values.length).toFixed(2));\n  };\n\n  const avgBool = (field) => {\n    const values = last7daysImages.map(r => {\n      const features = parseFeatures(r.features);\n      return features[field];\n    }).filter(v => v !== null && v !== undefined);\n    if (values.length === 0) return null;\n    const trueCount = values.filter(v => v === true || v === 'true').length;\n    return trueCount / values.length >= 0.5;\n  };\n\n  const avgMode = (field) => {\n    const values = last7daysImages.map(r => {\n      const features = parseFeatures(r.features);\n      return features[field];\n    }).filter(v => v !== null && v !== undefined);\n    if (values.length === 0) return null;\n    const freq = {};\n    values.forEach(v => { freq[v] = (freq[v] || 0) + 1; });\n    return Object.entries(freq).sort((a, b) => b[1] - a[1])[0][0];\n  };\n\n  const decisionStats = (actuator) => {\n    const decisions = last7daysImages.map(r => {\n      const d = parseDecision(r.actuator_decisions);\n      return d?.[actuator] ?? null;\n    }).filter(v => v !== null);\n    if (decisions.length === 0) return null;\n    const freq = {};\n    decisions.forEach(v => { freq[v] = (freq[v] || 0) + 1; });\n    return Object.entries(freq).sort((a, b) => b[1] - a[1])[0][0];\n  };\n\n  const last3 = last7daysImages.slice(-3).map(r => {\n    const features = parseFeatures(r.features);\n    const decision = parseDecision(r.actuator_decisions);\n    return {\n      timestamp:             r.timestamp,\n      image_summary:         r.summary ?? null,\n      confidence:            parseFloat(r.confidence) || null,\n      rain_detected:         features.rain_detected         ?? null,\n      water_on_leaves:       features.water_on_leaves       ?? null,\n      cloud_cover:           features.cloud_cover           ?? null,\n      lighting_level:        features.lighting_level        ?? null,\n      shadows_present:       features.shadows_present       ?? null,\n      plant_motion_detected: features.plant_motion_detected ?? null,\n      motion_intensity:      features.motion_intensity      ?? null,\n      decision: {\n        pump: decision?.pump ?? null,\n        fan:  decision?.fan  ?? null\n      }\n    };\n  });\n\n  imagesHistory = {\n    averages_7d: {\n      confidence:            avgNum('confidence'),\n      rain_detected:         avgBool('rain_detected'),\n      water_on_leaves:       avgBool('water_on_leaves'),\n      cloud_cover:           avgMode('cloud_cover'),\n      lighting_level:        avgMode('lighting_level'),\n      shadows_present:       avgBool('shadows_present'),\n      plant_motion_detected: avgBool('plant_motion_detected'),\n      motion_intensity:      avgMode('motion_intensity')\n    },\n    decision_stats_7d: {\n      pump: decisionStats('pump'),\n      fan:  decisionStats('fan')\n    },\n    last_3_runs: last3\n  };\n}\n\n// ----------------------------------------------------------------\n// BUILD FINAL HISTORY\n// ----------------------------------------------------------------\npayload.history = {\n  runs:   runsHistory,\n  images: imagesHistory\n};\n\nreturn [{ json: payload }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -3168,
+        400
+      ],
+      "id": "584fe6c5-be1b-4583-aca2-a04278dc7b32",
+      "name": "History_Loader"
+    },
+    {
+      "parameters": {
+        "jsCode": "const main = items[0].json;\n\n// ─── Weather feedback: only entries where value is null ───────────────────────\nconst filteredFeedback = (main.weather?.feedback ?? []).filter(f => {\n  const val = Object.values(f)[0];\n  return val === null;\n});\n\n// ─── Actuators: only TURN-ON (both modes) ────────────────────────────────────\nconst filteredActuators = (main.actuators ?? [])\n  .filter(a => a.classification === 'TURN-ON')\n  .map(a => ({\n    type: a.type,\n    run: {\n      execute_at:    a.run?.execute_at    ?? null,\n      execute_until: a.run?.execute_until ?? null\n    },\n    re_evaluation: {\n      start: a.re_evaluation?.interval?.start ?? null,\n      end:   a.re_evaluation?.interval?.end   ?? null\n    }\n  }));\n\n// ─── History: safe check ─────────────────────────────────────────────────────\nlet filteredHistory = null;\nif (main.history) {\n  filteredHistory = {\n    runs: {\n      averages_7d:          main.history.runs?.averages_7d ?? null,\n      water_consumption_7d: main.history.runs?.water_consumption_7d ?? null,\n      last_runs:            (main.history.runs?.last_7_days_runs ?? []).slice(0, 3)\n    },\n    images: {\n      averages_7d: main.history.images?.averages_7d ?? null,\n      last_images: (main.history.images?.last_7_days ?? []).slice(0, 3)\n    }\n  };\n}\n\n// ─── Assemble output ──────────────────────────────────────────────────────────\nconst output = {\n  time: main.meta?.triggered_at ?? null,\n  crop: main.crop ?? null,\n  weather: {\n    precipitation_probability: main.weather?.precipitation_probability ?? null,\n    summary:                   main.weather?.summary ?? null,\n    feedback:                  filteredFeedback\n  },\n  image_processing: main.image_processing ?? null,\n  history:          filteredHistory, // will be null if history missing\n  actuators:        filteredActuators\n};\n\nreturn [{ json: output }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1472,
+        400
+      ],
+      "id": "0da7f425-e183-4e15-a308-f072fa6495dc",
+      "name": "filter only what is needed for final decisions"
+    },
+    {
+      "parameters": {
+        "jsCode": "const main = items[0].json;\n\nconst output = {\n  time: main.meta.triggered_at,\n  crop: main.crop ?? null,\n  sensors: (main.sensors ?? []).map(s => ({\n    type:  s.type,\n    value: s.value\n  }))\n};\n\nreturn [{ json: output }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -672,
+        400
+      ],
+      "id": "53b9538c-317c-4de3-b625-982077fd028f",
+      "name": "filter only the sensor data"
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw      = JSON.parse($input.first().json.output);\nconst mainJson = { ...$('Merge the results').first().json };\n\n// ─── Merge actuators ──────────────────────────────────────────────────────────\nconst decisionMap = {};\nraw.actuators.forEach(a => {\n  decisionMap[a.type.toLowerCase()] = a;\n});\nmainJson.actuators = mainJson.actuators.map(a => {\n  const decision = decisionMap[a.type.toLowerCase()];\n  if (!decision) return a;\n  return {\n    ...a,\n    classification: decision.classification,\n    run: {\n      ...a.run,\n      active:           decision.run.active,\n      execute_at:       decision.run.execute_at        ?? null,\n      execute_until:    decision.run.execute_until      ?? null,\n      duration_minutes: decision.run.duration_minutes   ?? null\n    },\n    re_evaluation: {\n      ...a.re_evaluation,\n      active:  decision.re_evaluation.active,\n      skipped: decision.re_evaluation.skipped,\n      interval: {\n        start: decision.re_evaluation.start ?? decision.re_evaluation.interval?.start ?? null,\n        end:   decision.re_evaluation.end   ?? decision.re_evaluation.interval?.end   ?? null\n      }\n    }\n  };\n});\n\n// ─── Merge recommendation ─────────────────────────────────────────────────────\nmainJson.recommendation = raw.recommendation ?? null;\n\n// ─── Remove history ───────────────────────────────────────────────────────────\ndelete mainJson.history;\n\nreturn [{ json: mainJson }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -896,
+        400
+      ],
+      "id": "628767e4-2f83-4960-bafc-c14fc7d09be8",
+      "name": "Final_Decisions"
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw      = JSON.parse($input.first().json.output);\nconst mainJson = { ...$('Final_Decisions').first().json };\n\n// ─── Merge sensor descriptions ────────────────────────────────────────────────\n\nconst descriptionMap = {};\nraw.forEach(s => {\n  descriptionMap[s.type.toLowerCase()] = s.description;\n});\n\nmainJson.sensors = mainJson.sensors.map(s => ({\n  ...s,\n  description: descriptionMap[s.type.toLowerCase()] ?? s.description\n}));\n\nreturn [{ json: mainJson }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -96,
+        400
+      ],
+      "id": "49171bae-698a-4ae5-8fcb-c3cd32152ce6",
+      "name": "Sensors_Updater"
+    },
+    {
+      "parameters": {
+        "model": "openai/gpt-oss-safeguard-20b",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        424,
+        624
+      ],
+      "id": "dafba9c7-5a98-4ec8-a299-11ef3d15a2b4",
+      "name": "Groq Chat Model4",
+      "credentials": {
+        "groqApi": {
+          "id": "yQmKjWe8sUxfSj4V",
+          "name": "Groq account 4"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const main = items[0].json;\n\nconst output = {\n  time:    main.meta.triggered_at,\n  crop:    main.crop ?? null,\n  sensors: (main.sensors ?? []).map(s => ({\n    type:  s.type,\n    value: s.value\n  })),\n  weather: {\n    state:                     main.weather.state,\n    precipitation_probability: main.weather.precipitation_probability,\n    summary:                   main.weather.summary\n  },\n  image_processing: {\n    features:   main.image_processing.features ?? null,\n    confidence: main.image_processing.confidence ?? null\n  },\n  warnings: (main.warnings ?? []).map(w => ({\n    name: w.name\n  }))\n};\n\nreturn [{ json: output }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        128,
+        400
+      ],
+      "id": "751715dd-1f0c-4240-8712-ed68fdc767c0",
+      "name": "filter only needed data"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=CURRENT TIME:\n{{$json.time}}\n\nCROP INFO:\n- Type:         {{$json.crop.type}}\n- Growth stage: {{$json.crop.growth_stage}}\n- Farm mode:    {{$json.crop.mode}}\n\nSENSOR READINGS ({{$json.sensors.length}} sensors):\n{{$json.sensors.map(s => `- ${s.type}: ${s.value}`).join('\\n')}}\n\nFor each of the {{$json.sensors.length}} sensor(s) above, write a short urgent or calm description (~68 characters) interpreting the value's impact on the {{$json.crop.type}} plant at the {{$json.crop.growth_stage}} stage.\n\nReturn a JSON array of exactly {{$json.sensors.length}} objects, each with \"type\" and \"description\" only.\nSame order as received. No explanation, no markdown.",
+        "options": {
+          "systemMessage": "You are an expert agricultural sensor analyst. You receive real-time sensor readings from a smart farm and your job is to interpret each reading in the context of the crop type and growth stage, and write a short human-friendly description for each sensor.\n\n─── YOUR JOB ────────────────────────────────────────────────────────────────────\n\nFor each sensor you receive, write a single plain-language description that:\n- Interprets what the current value means for the plant specifically\n- Reflects urgency when values are critical or dangerous (e.g. \"dangerously high\", \"critically dry\", \"severe risk\")\n- Uses calm neutral language when values are within acceptable range\n- Is approximately 68 characters long (strict maximum 90 characters)\n- Is written in second person, addressing the farmer directly (e.g. \"Your soil is...\", \"The plant is...\")\n- Never just repeats the number, always interprets its impact on the plant\n\n─── SENSOR TYPES ────────────────────────────────────────────────────────────────\n\n- soil_moisture : 0-100%, low = dry = needs irrigation, high = wet = risk of overwatering\n- temperature   : 0-100°C, interpret relative to crop thresholds, high = heat stress risk\n- air_humidity  : 0-100%, too low = dehydration risk, too high = fungal/disease risk\n- luminosity    : 0-100%, too low = insufficient photosynthesis, too high = sun stress\n\n─── URGENCY SCALE ───────────────────────────────────────────────────────────────\n\nAlways calibrate your language to the severity:\n- 0-20% of safe range   → use words like \"critically\", \"severely\", \"dangerously\"\n- 20-40% of safe range  → use words like \"very\", \"quite\", \"significantly\"\n- 40-60% of safe range  → use words like \"slightly\", \"moderately\"\n- 60-100% of safe range → use calm neutral language, reassure the farmer\n\n─── OUTPUT FORMAT ───────────────────────────────────────────────────────────────\n\nReturn ONLY a valid JSON array, one object per sensor, same order as received.\nEach object must have exactly two fields: \"type\" and \"description\".\nNo explanation, no commentary, no markdown, no code blocks.\n\nExample:\n[\n  {\"type\": \"soil_moisture\", \"description\": \"Your soil is critically dry, irrigate immediately to prevent crop loss.\"},\n  {\"type\": \"temperature\",   \"description\": \"Temperature is dangerously high, your orange trees are under severe heat stress.\"},\n  {\"type\": \"air_humidity\",  \"description\": \"Humidity is comfortable and well suited for the flowering stage.\"},\n  {\"type\": \"luminosity\",    \"description\": \"Light levels are strong and healthy for active photosynthesis right now.\"}\n]\n\n─── STRICT OUTPUT RULES ─────────────────────────────────────────────────────────\n\n- Return ONLY the JSON array, nothing else\n- Exactly the same number of objects as sensors received, same order\n- Each description must be ~68 characters, maximum 90 characters\n- Do not add any extra fields\n- Do not rename sensor types"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        -448,
+        400
+      ],
+      "id": "5daef458-8ca4-4303-96c7-c1f35353977a",
+      "name": "Sensors_Updater_Agent"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=CURRENT TIME:\n{{$json.time}}\n\nCROP INFO:\n- Type:         {{$json.crop.type}}\n- Growth stage: {{$json.crop.growth_stage}}\n- Farm mode:    {{$json.crop.mode}}\n\nSENSOR READINGS:\n{{$json.sensors.map(s => `- ${s.type}: ${s.value}`).join('\\n')}}\n\nWEATHER:\n- State:                     {{$json.weather.state}}\n- Precipitation probability: {{$json.weather.precipitation_probability}}%\n- Summary:                   {{$json.weather.summary}}\n\nIMAGE PROCESSING:\n- Confidence:          {{$json.image_processing.confidence}}%\n- Rain detected:       {{$json.image_processing.features.rain_detected}}\n- Water on leaves:     {{$json.image_processing.features.water_on_leaves}}\n- Cloud cover:         {{$json.image_processing.features.cloud_cover}}\n- Lighting level:      {{$json.image_processing.features.lighting_level}}\n- Plant motion:        {{$json.image_processing.features.plant_motion_detected}}\n- Motion intensity:    {{$json.image_processing.features.motion_intensity}}\n\nWARNINGS TO EVALUATE ({{$json.warnings.length}} total):\n{{$json.warnings.map(w => `- ${w.name}`).join('\\n')}}\n\nFor each of the {{$json.warnings.length}} warning(s) above, evaluate if it is active, assign a severity (0-100), and write a ~68 character description.\n\nReturn a JSON array of exactly {{$json.warnings.length}} objects, each with \"name\", \"active\", \"severity\", \"description\" only.\nSame order as received. No explanation, no markdown.",
+        "options": {
+          "systemMessage": "You are an expert agricultural risk analyst. You receive real-time farm data and your job is to evaluate a fixed list of warnings, and for each one decide if it is active or not, assign a severity score, and write a short description.\n\n─── YOUR JOB ────────────────────────────────────────────────────────────────────\n\nFor each warning in the list you receive, you must:\n1. Decide if it is active (true) or not (false) based on the sensor readings, weather, and image processing data\n2. Assign a severity score from 0 to 100 (0 = no risk at all, 100 = extreme/critical risk)\n3. Write a short plain-language description (~68 characters) explaining the situation\n\n─── WARNING EVALUATION RULES ────────────────────────────────────────────────────\n\nUse the following signals to evaluate each warning:\n\n- frost_risk               → temperature sensor + weather state. Active if temp is very low or weather suggests freezing conditions. Critical during flowering stage.\n- heavy_rainfall           → weather precipitation_probability + image rain_detected. Active if probability is high or rain is detected in image.\n- high_humidity_level      → air_humidity sensor. Active if humidity is too high for the crop and growth stage.\n- high_temperature_detected→ temperature sensor. Active if temperature exceeds safe thresholds for the crop.\n- insufficient_sunlight    → luminosity sensor + weather state. Active if luminosity is too low for the crop's needs.\n- excessive_sunlight       → luminosity sensor. Active if luminosity is dangerously high.\n- low_soil_moisture        → soil_moisture sensor. Active if soil is too dry for the crop and growth stage.\n- overwatering             → soil_moisture sensor + image water_on_leaves. Active if soil is saturated or leaves show water.\n- strong_wind              → image plant_motion_detected + motion_intensity. Active if plants show strong motion.\n\n─── SEVERITY SCALE ──────────────────────────────────────────────────────────────\n\n- 0        → warning is not active, no risk\n- 1-25     → minor risk, monitor the situation\n- 26-50    → moderate risk, attention needed\n- 51-75    → significant risk, action recommended\n- 76-100   → critical risk, immediate action required\n\nIf a warning is not active, severity must be 0.\nIf a warning is active, severity must be at least 1.\n\n─── DESCRIPTION RULES ───────────────────────────────────────────────────────────\n\n- ~68 characters, maximum 90 characters\n- If active: explain the risk and its impact on the plant with appropriate urgency\n- If not active: write a short reassuring message (e.g. \"No frost risk detected, your crop is safe.\")\n- Always mention the crop type or plant in the description\n- Never just repeat the sensor value, always interpret its meaning\n\n─── OUTPUT FORMAT ───────────────────────────────────────────────────────────────\n\nReturn ONLY a valid JSON array, one object per warning, same order as received.\nEach object must have exactly four fields: \"name\", \"active\", \"severity\", \"description\".\nNo explanation, no commentary, no markdown, no code blocks.\n\nExample:\n[\n  {\"name\": \"frost_risk\", \"active\": false, \"severity\": 0, \"description\": \"No frost risk detected, your orange trees are safe.\"},\n  {\"name\": \"heavy_rainfall\", \"active\": true, \"severity\": 72, \"description\": \"Heavy rain likely soon, risk of waterlogging for flowering oranges.\"}\n]\n\n─── STRICT OUTPUT RULES ─────────────────────────────────────────────────────────\n\n- Return ONLY the JSON array, nothing else\n- Exactly the same number of objects as warnings received, same order\n- Do not add any extra fields\n- Do not rename warning names\n- severity must be 0 when active is false, and >= 1 when active is true\n- All times in \"HH:MM\" 24h format if needed"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        352,
+        400
+      ],
+      "id": "cdd3ae27-8a4a-41d2-a16b-990e0b5aac8d",
+      "name": "Warnings_Updater_Agent"
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw      = JSON.parse($input.first().json.output);\nconst mainJson = { ...$('Sensors_Updater').first().json };\n\n// ─── Merge warnings ───────────────────────────────────────────────────────────\nconst warningsMap = {};\nraw.forEach(w => {\n  warningsMap[w.name.toLowerCase()] = w;\n});\nmainJson.warnings = mainJson.warnings.map(w => {\n  const updated = warningsMap[w.name.toLowerCase()];\n  if (!updated) return w;\n  return {\n    ...w,\n    active:      updated.active,\n    severity:    updated.severity,\n    description: updated.description\n  };\n});\n\n// ─── Recommended action for semi-auto actuators ───────────────────────────────\nmainJson.actuators = mainJson.actuators.map(a => {\n  if (a.control_mode !== 'semi-auto') return a;\n  let recommended_action = null;\n  switch (a.classification) {\n    case 'TURN-ON':\n      recommended_action = `Turn on the ${a.type} for ${a.run.duration_minutes ?? '?'} minutes starting from ${a.run.execute_at ?? '?'}.`;\n      break;\n    case 'TURN-OFF':\n      recommended_action = `Turn off the ${a.type} immediately, conditions no longer require it.`;\n      break;\n    case 'KEEP-ON':\n      recommended_action = `Keep the ${a.type} running, current conditions still require it.`;\n      break;\n    case 'KEEP-OFF':\n      recommended_action = `Keep the ${a.type} off, no action is needed at this time.`;\n      break;\n    case 'FUTURE-RE-EVALUATING':\n    case 'NEED-RE-EVALUATION':\n      recommended_action = null;\n      break;\n    default:\n      recommended_action = null;\n  }\n  return { ...a, recommended_action };\n});\n\n// ─── Remove history ───────────────────────────────────────────────────────────\ndelete mainJson.history;\n\nreturn [{ json: mainJson }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        704,
+        400
+      ],
+      "id": "1fbcd4f8-36c3-4233-966f-8384fef2a3ac",
+      "name": "Warnings_Updater"
+    },
+    {
+      "parameters": {
+        "jsCode": "const main = items[0].json;\n\nconst output = {\n  time: main.meta.triggered_at,\n  crop: main.crop ?? null,\n\n  // only relevant actuator fields for notifications\n  actuators: (main.actuators ?? []).map(a => ({\n    type:            a.type,\n    control_mode:    a.control_mode,\n    classification:  a.classification,\n    run: {\n      execute_at:       a.run?.execute_at       ?? null,\n      execute_until:    a.run?.execute_until     ?? null,\n      duration_minutes: a.run?.duration_minutes  ?? null\n    },\n    recommended_action: a.recommended_action ?? null\n  })),\n\n  // only active warnings\n  warnings: (main.warnings ?? [])\n    .filter(w => w.active === true)\n    .map(w => ({\n      name:        w.name,\n      severity:    w.severity,\n      description: w.description\n    })),\n\n  // weather summary only, no insights\n  weather: {\n    state:                     main.weather.state,\n    precipitation_probability: main.weather.precipitation_probability,\n    summary:                   main.weather.summary\n  }\n};\n\nreturn [{ json: output }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        928,
+        400
+      ],
+      "id": "6a16b2bf-f8d4-45aa-a870-e68ad3a175a2",
+      "name": "filter only what is needed"
+    },
+    {
+      "parameters": {
+        "model": "openai/gpt-oss-safeguard-20b",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        1224,
+        624
+      ],
+      "id": "85cce615-0bf6-429a-a27a-19fe9b2513ad",
+      "name": "Groq Chat Model5",
+      "credentials": {
+        "groqApi": {
+          "id": "w2kySJjiKQ2jRWG1",
+          "name": "Groq account 3"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=CURRENT TIME:\n{{$json.time}}\n\nCROP INFO:\n- Type:         {{$json.crop.type}}\n- Growth stage: {{$json.crop.growth_stage}}\n- Farm mode:    {{$json.crop.mode}}\n\nACTUATORS:\n{{JSON.stringify($json.actuators)}}\n\nACTIVE WARNINGS ({{$json.warnings.length}} total):\n{{JSON.stringify($json.warnings)}}\n\nWEATHER:\n- State:                     {{$json.weather.state}}\n- Precipitation probability: {{$json.weather.precipitation_probability}}%\n- Summary:                   {{$json.weather.summary}}\n\nBased on the above, generate a maximum of 6 prioritized push notifications for the farmer.\nPrioritize: critical warnings first, then actuator actions, then moderate warnings, then weather, then minor notices.\nReturn a JSON array of maximum 6 objects, each with \"title\" and \"description\" only.\nNo technical field names, no markdown, no explanation.",
+        "options": {
+          "systemMessage": "You are an expert agricultural notification system. You receive real-time farm data and your job is to generate a concise, prioritized list of push notifications for the farmer, based on actuator actions, active warnings, and weather forecast.\n\n─── YOUR JOB ────────────────────────────────────────────────────────────────────\n\nGenerate a maximum of 6 notifications total, prioritized by urgency. Each notification has exactly two fields: \"title\" and \"description\".\n\n─── NOTIFICATION SOURCES ────────────────────────────────────────────────────────\n\nYou have three sources to generate notifications from:\n\n1. ACTUATORS:\n   - For each actuator with classification TURN-ON  → notify the farmer that it will run (mention time and duration if available)\n   - For each actuator with classification TURN-OFF → notify the farmer that it will be turned off\n   - For each actuator with classification KEEP-ON  → notify that it is staying on (only if noteworthy)\n   - For each actuator with classification NEED-RE-EVALUATION or FUTURE-RE-EVALUATING → notify that a re-check is scheduled\n   - For semi-auto actuators, use the recommended_action field to enrich the notification\n   - Skip actuators with KEEP-OFF, FREE, WORKING, PENDING classifications (not worth notifying)\n\n2. ACTIVE WARNINGS:\n   - For each active warning, rewrite it as a proper push notification (not a technical warning label)\n   - Higher severity warnings should be prioritized and placed first\n   - Use urgent but calm language appropriate for a mobile notification\n   - Example: instead of \"high_temperature_detected is active\", write \"🌡️ Heat Alert — Your orange trees are under heat stress. Consider providing shade.\"\n\n3. WEATHER:\n   - Generate one weather forecast notification summarizing the upcoming conditions\n   - Mention rain risk if precipitation probability is significant (above 30%)\n   - Keep it brief and actionable for the farmer\n\n─── PRIORITIZATION RULES ────────────────────────────────────────────────────────\n\nOrder notifications by priority:\n1. Critical active warnings (severity > 75) first\n2. Actuator actions (TURN-ON, TURN-OFF) second\n3. Moderate active warnings (severity 26-75) third\n4. Weather forecast fourth\n5. Minor warnings and re-evaluation notices last\n\nIf total notifications exceed 6, drop the lowest priority ones.\n\n─── TITLE AND DESCRIPTION RULES ─────────────────────────────────────────────────\n\n- Title: short, max 40 characters, can include a relevant emoji\n- Description: plain farmer-friendly language, max 100 characters, actionable when possible\n- Never use technical field names like \"high_temperature_detected\" or \"TURN-ON\" in the output\n- Always mention the crop type or actuator name in plain language (e.g. \"pump\", \"fan\", \"orange trees\")\n\n─── OUTPUT FORMAT ───────────────────────────────────────────────────────────────\n\nReturn ONLY a valid JSON array of notification objects, maximum 6 items.\nEach object must have exactly two fields: \"title\" and \"description\".\nNo explanation, no commentary, no markdown, no code blocks.\n\nExample:\n[\n  {\"title\": \"💧 Irrigation Scheduled\", \"description\": \"Pump will run for 20 minutes starting at 06:00. Soil moisture is low.\"},\n  {\"title\": \"🌧️ Rain Alert\", \"description\": \"65% chance of rain tonight. Consider delaying irrigation until tomorrow.\"},\n  {\"title\": \"🌡️ Heat Warning\", \"description\": \"Temperature is critically high. Your orange trees are under severe heat stress.\"}\n]\n\n─── STRICT OUTPUT RULES ─────────────────────────────────────────────────────────\n\n- Return ONLY the JSON array, nothing else\n- Maximum 6 objects\n- Each object must have exactly \"title\" and \"description\", nothing else\n- No technical field names in the output\n- No markdown, no code blocks, no explanation"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        1152,
+        400
+      ],
+      "id": "414f3a8f-fc06-4300-90a9-ccd66b796c5d",
+      "name": "Notifications_Maker"
+    },
+    {
+      "parameters": {
+        "jsCode": "// n8n Code Node\n\nconst input = $input.first().json;\n\n// 1. Sensors → object\nconst sensorsObj = {};\nfor (const s of input.sensors || []) {\n  sensorsObj[s.type] = s.value;\n}\n\n// 2. Actuators → keep ALL (even if not running)\nconst actuatorsArr = (input.actuators || []).map(a => ({\n  type: a.type,\n  classification: a.classification,\n  execute_at: a.run?.execute_at || null,\n  execute_until: a.run?.execute_until || null,\n  duration_minutes: a.run?.duration_minutes || null\n}));\n\n// 3. Only active warnings\nconst warningsArr = (input.warnings || [])\n  .filter(w => w.active)\n  .map(w => ({\n    name: w.name,\n    severity: w.severity\n  }));\n\n// 4. Final output\nconst output = {\n  run_id: input.meta?.run_id,\n  triggered_at: input.meta?.triggered_at,\n\n  crop: {\n    type: input.crop?.type,\n    growth_stage: input.crop?.growth_stage,\n    mode: input.crop?.mode\n  },\n\n  sensors: sensorsObj,\n\n  actuators: actuatorsArr,\n\n  warnings: warningsArr,\n\n  weather: {\n    state: input.weather?.state,\n    precipitation_probability: input.weather?.precipitation_probability,\n    summary: input.weather?.summary\n  },\n\n  recommendation: input.recommendation\n};\n\nreturn [{ json: output }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1728,
+        592
+      ],
+      "id": "f6865dd1-655b-4baf-8a53-a1667d15a42e",
+      "name": "filter for the runs history"
+    },
+    {
+      "parameters": {
+        "jsCode": "// n8n Code Node\n\nconst input = $input.first().json;\n\n// 1. Build actuator_decisions (type → classification)\nconst actuatorDecisions = {};\nfor (const a of input.actuators || []) {\n  actuatorDecisions[a.type] = a.classification;\n}\n\n// 2. Build final output\nconst output = {\n  timestamp: input.meta?.triggered_at,\n\n  summary: input.image_processing?.summary,\n\n  confidence: input.image_processing?.confidence,\n\n  features: {\n    rain_detected: input.image_processing?.features?.rain_detected,\n    water_on_leaves: input.image_processing?.features?.water_on_leaves,\n    cloud_cover: input.image_processing?.features?.cloud_cover,\n    lighting_level: input.image_processing?.features?.lighting_level,\n    shadows_present: input.image_processing?.features?.shadows_present,\n    plant_motion_detected: input.image_processing?.features?.plant_motion_detected,\n    motion_intensity: input.image_processing?.features?.motion_intensity\n  },\n\n  actuator_decisions: actuatorDecisions\n};\n\nreturn [{ json: output }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1728,
+        208
+      ],
+      "id": "525bc09a-bea6-4122-98e9-dc9dc5379541",
+      "name": "filter for the image processing history"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1hhZUzb_vaXrBVv_pv6G0IfiqtxUKAwfNxYkqOXD93f0",
+          "mode": "list",
+          "cachedResultName": "sahla_farm",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1hhZUzb_vaXrBVv_pv6G0IfiqtxUKAwfNxYkqOXD93f0/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1909675133,
+          "mode": "list",
+          "cachedResultName": "runs",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1hhZUzb_vaXrBVv_pv6G0IfiqtxUKAwfNxYkqOXD93f0/edit#gid=1909675133"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "run_id": "={{ $json.run_id }}",
+            "triggered_at": "={{ $json.triggered_at }}",
+            "crop": "={{ $json.crop }}",
+            "sensors": "={{ $json.sensors }}",
+            "actuators": "={{ $json.actuators }}",
+            "warnings": "={{ $json.warnings }}",
+            "weather": "={{ $json.weather }}",
+            "recommendation": "={{ $json.recommendation }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "run_id",
+              "displayName": "run_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "triggered_at",
+              "displayName": "triggered_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "crop",
+              "displayName": "crop",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "sensors",
+              "displayName": "sensors",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "actuators",
+              "displayName": "actuators",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "warnings",
+              "displayName": "warnings",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "weather",
+              "displayName": "weather",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "recommendation",
+              "displayName": "recommendation",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1952,
+        592
+      ],
+      "id": "459cd373-7018-41d0-8308-08b58facbfa8",
+      "name": "Append row in sheet",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "E8fQO14Ggb744oak",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1hhZUzb_vaXrBVv_pv6G0IfiqtxUKAwfNxYkqOXD93f0",
+          "mode": "list",
+          "cachedResultName": "sahla_farm",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1hhZUzb_vaXrBVv_pv6G0IfiqtxUKAwfNxYkqOXD93f0/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 383692769,
+          "mode": "list",
+          "cachedResultName": "image_runs",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1hhZUzb_vaXrBVv_pv6G0IfiqtxUKAwfNxYkqOXD93f0/edit#gid=383692769"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "timestamp": "={{ $json.timestamp }}",
+            "summary": "={{ $json.summary }}",
+            "confidence": "={{ $json.confidence }}",
+            "features": "={{ $json.features }}",
+            "actuator_decisions": "={{ $json.actuator_decisions }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "timestamp",
+              "displayName": "timestamp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "summary",
+              "displayName": "summary",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "confidence",
+              "displayName": "confidence",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "features",
+              "displayName": "features",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "actuator_decisions",
+              "displayName": "actuator_decisions",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1952,
+        208
+      ],
+      "id": "2accb420-4ddb-4887-81df-adf3d0054b98",
+      "name": "Append row in sheet1",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "E8fQO14Ggb744oak",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first().json;\n\nconst activeActuators = (input.actuators ?? []).filter(a => a.skipped === false);\n\nconst actuators = activeActuators.length === 0 ? null : activeActuators.map(a => ({\n  type:           a.type,\n  classification: a.classification ?? null,\n  ...(a.control_mode === 'semi-auto' ? { recommended_action: a.recommended_action ?? null } : {}),\n  run:            a.run            ?? null,\n  re_evaluation:  a.re_evaluation  ?? null\n}));\n\nconst output = {\n  sensors: input.sensors.map(s => ({\n    type:        s.type,\n    description: s.description ?? null\n  })),\n  actuators,\n  notifications:  input.notifications  ?? null,\n  warnings:       input.warnings       ?? null,\n  recommendation: input.recommendation ?? null,\n  weather:        input.weather        ?? null\n};\n\nreturn [{ json: output }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1728,
+        400
+      ],
+      "id": "73610f03-224f-4901-80f7-a7d27bc90ec6",
+      "name": "data sender filter"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ─── 0. Get input from n8n ─────────────────────────────────────────────────────\nconst input = $input.first().json;\n\nconst entities = [];\n\n// ─── Helper: convert \"HH:MM\" to full ISO datetime using today's date ──────────\nfunction toFullDatetime(timeStr) {\n  if (!timeStr) return null;\n  if (timeStr.includes('T') || timeStr.length > 5) return timeStr;\n  const now = new Date();\n  const yyyy = now.getFullYear();\n  const mm   = String(now.getMonth() + 1).padStart(2, '0');\n  const dd   = String(now.getDate()).padStart(2, '0');\n  return `${yyyy}-${mm}-${dd}T${timeStr}:00`;\n}\n\n// ─── 1. n8n_response (everything except actuators) ───────────────────────────\nconst { actuators, ...rest } = input;\n\nentities.push({\n  entity_id: 'sensor.n8n_response',\n  state: 'ok',\n  value: rest\n});\n\n// ─── 2. Loop through actuators ─────────────────────────────────────────────────\nconst keepClassifications = ['KEEP-ON', 'KEEP-OFF', 'ON', 'OFF'];\n\nfor (const actuator of (actuators ?? [])) {\n  const type           = actuator.type;\n  const classification = actuator.classification;\n\n  // ── NEED-RE-EVALUATION ──\n  if (classification === 'NEED-RE-EVALUATION') {\n    entities.push({\n      entity_id: `input_datetime.${type}_re_evaluation_start`,\n      value: toFullDatetime(actuator.re_evaluation?.interval?.start ?? null)\n    });\n    entities.push({\n      entity_id: `input_datetime.${type}_re_evaluation_end`,\n      value: toFullDatetime(actuator.re_evaluation?.interval?.end ?? null)\n    });\n  }\n\n  // ── TURN-ON ──\n  else if (classification === 'TURN-ON') {\n    const executeAt    = actuator.run?.execute_at ?? null;\n    const executeUntil = actuator.run?.execute_until ?? null;\n\n    entities.push({\n      entity_id: `input_datetime.${type}_excecute_at`,\n      value: toFullDatetime(executeAt)\n    });\n    entities.push({\n      entity_id: `input_datetime.${type}_excecute_until`,\n      value: toFullDatetime(executeUntil)\n    });\n\n    // Optional: auto mode status if you want to keep it\n    if (actuator.control_mode === 'auto' && !executeAt) {\n      entities.push({\n        entity_id: `input_boolean.${type}_status`,\n        state: 'on'\n      });\n    }\n  }\n\n  // ── KEEP-* → nothing ──\n  else if (keepClassifications.includes(classification)) {\n    // intentionally empty\n  }\n\n  // ── ANY recommended_action field ──\n  if (actuator.recommended_action !== undefined) {\n    entities.push({\n      entity_id: `input_text.${type}_recommended_action`,\n      value: actuator.recommended_action\n    });\n  }\n}\n\n// ─── 3. Return all entities for n8n ───────────────────────────────────────────\nreturn entities.map(e => ({ json: e }));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1952,
+        400
+      ],
+      "id": "7acea94c-9dea-4be7-bd17-e5eac3f76f30",
+      "name": "entity + value pairs maker"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\nconst HA_BASE_URL = 'http://192.168.100.34:8123/api/states/';\n\nreturn items.map(item => ({\n  json: {\n    ...item.json,\n    url: `${HA_BASE_URL}${item.json.entity_id}`\n  }\n}));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2176,
+        400
+      ],
+      "id": "992e1923-f2bc-4fff-b921-23fc0cfb2aff",
+      "name": "join each value with the url in ha"
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw      = JSON.parse($input.first().json.output);\nconst mainJson = { ...$('Warnings_Updater').first().json };\n\n// ─── Merge notifications ──────────────────────────────────────────────────────\n\nmainJson.notifications = raw;\n\nreturn [{ json: mainJson }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1504,
+        400
+      ],
+      "id": "78549861-12fe-4c54-bacd-9e0d9d126845",
+      "name": "full main json payload"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.url }}",
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "{\n        \"Authorization\": \"Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJkNWE1ZDVjMzQyNTE0MzE4YjI0MTI1NjZiOTNlOWEzNiIsImlhdCI6MTc3MTkzMDY5MCwiZXhwIjoyMDg3MjkwNjkwfQ.obmGhZBspOzi-72YyCCsca-qiL8w5sNgPnHnJJmZL94\",\n        \"Content-Type\": \"application/json\"\n      }",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"state\": \"{{ typeof $json.value === 'object' ? 'ok' : $json.value }}\",\n  \"attributes\": {\n    \"data\": \"{{ typeof $json.value === 'object' ? $json.value : undefined }}\"\n  }\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2400,
+        400
+      ],
+      "id": "8695306d-343d-4926-98fb-af327a1c61dd",
+      "name": "data sender",
+      "executeOnce": false
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Groq Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Pre_Decider",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenRouter Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Weather_Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Groq Chat Model1": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Final_Decider",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger1": {
+      "main": [
+        [
+          {
+            "node": "Data_Fetcher",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preliminary_Decisions": {
+      "main": [
+        [
+          {
+            "node": "images history",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "runs history",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Wait Both",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Weather_API_Call": {
+      "main": [
+        [
+          {
+            "node": "Weather_Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Weather_Agent": {
+      "main": [
+        [
+          {
+            "node": "Weather_Enriched",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Weather_Enriched": {
+      "main": [
+        [
+          {
+            "node": "Decisions + Image results",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Image Processing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Final_Decider": {
+      "main": [
+        [
+          {
+            "node": "Final_Decisions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pre_Decider": {
+      "main": [
+        [
+          {
+            "node": "Preliminary_Decisions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Groq Chat Model3": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Sensors_Updater_Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Image Processing": {
+      "main": [
+        [
+          {
+            "node": "Decisions + Image results",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Decisions + Image results": {
+      "main": [
+        [
+          {
+            "node": "Merge the results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge the results": {
+      "main": [
+        [
+          {
+            "node": "filter only what is needed for final decisions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Data_Fetcher": {
+      "main": [
+        [
+          {
+            "node": "Payload_Builder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Payload_Builder": {
+      "main": [
+        [
+          {
+            "node": "Filter actuators + important data only",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter actuators + important data only": {
+      "main": [
+        [
+          {
+            "node": "Pre_Decider",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "runs history": {
+      "main": [
+        [
+          {
+            "node": "Wait Both",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "images history": {
+      "main": [
+        [
+          {
+            "node": "Wait Both",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Wait Both": {
+      "main": [
+        [
+          {
+            "node": "History_Loader",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "History_Loader": {
+      "main": [
+        [
+          {
+            "node": "Weather_API_Call",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "filter only what is needed for final decisions": {
+      "main": [
+        [
+          {
+            "node": "Final_Decider",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "filter only the sensor data": {
+      "main": [
+        [
+          {
+            "node": "Sensors_Updater_Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Final_Decisions": {
+      "main": [
+        [
+          {
+            "node": "filter only the sensor data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sensors_Updater": {
+      "main": [
+        [
+          {
+            "node": "filter only needed data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Groq Chat Model4": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Warnings_Updater_Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "filter only needed data": {
+      "main": [
+        [
+          {
+            "node": "Warnings_Updater_Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sensors_Updater_Agent": {
+      "main": [
+        [
+          {
+            "node": "Sensors_Updater",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Warnings_Updater_Agent": {
+      "main": [
+        [
+          {
+            "node": "Warnings_Updater",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Warnings_Updater": {
+      "main": [
+        [
+          {
+            "node": "filter only what is needed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "filter only what is needed": {
+      "main": [
+        [
+          {
+            "node": "Notifications_Maker",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Groq Chat Model5": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Notifications_Maker",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notifications_Maker": {
+      "main": [
+        [
+          {
+            "node": "full main json payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "filter for the runs history": {
+      "main": [
+        [
+          {
+            "node": "Append row in sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "filter for the image processing history": {
+      "main": [
+        [
+          {
+            "node": "Append row in sheet1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "data sender filter": {
+      "main": [
+        [
+          {
+            "node": "entity + value pairs maker",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "entity + value pairs maker": {
+      "main": [
+        [
+          {
+            "node": "join each value with the url in ha",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "join each value with the url in ha": {
+      "main": [
+        [
+          {
+            "node": "data sender",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "full main json payload": {
+      "main": [
+        [
+          {
+            "node": "filter for the runs history",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "filter for the image processing history",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "data sender filter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "cbb6c7fb-4562-4cb4-856e-da44e8ec4fd7",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "af73889df6e41fa948c9be83dfce5dd763c977531265542df4d02721aa9d9365"
+  },
+  "id": "8rvP8BhFGM00C0GL",
+  "tags": []
+}

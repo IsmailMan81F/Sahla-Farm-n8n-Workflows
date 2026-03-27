@@ -1,0 +1,309 @@
+{
+  "name": "Preliminary_Decisions",
+  "nodes": [
+    {
+      "parameters": {
+        "model": "openai/gpt-oss-safeguard-20b",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        1064,
+        256
+      ],
+      "id": "14c5fc8b-8af2-40d0-ac22-f8e9eb9ea7f3",
+      "name": "Groq Chat Model",
+      "credentials": {
+        "groqApi": {
+          "id": "3DqNTy9hnqdhKooY",
+          "name": "Groq account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const decisions = JSON.parse(items[0].json.output);\nconst mainJson = $('Data_Fetcher').first().json;\n\n// Map decisions by type for safe lookup\nconst decisionMap = {};\ndecisions.forEach(d => {\n  decisionMap[d.type.toLowerCase()] = d.decision;\n});\n\n// Apply classifications back onto the main json actuators\nconst updatedActuators = mainJson.actuators.map(a => {\n  const decision = decisionMap[a.type.toLowerCase()];\n\n  if (!decision) return a; // no decision found, leave untouched\n\n  if (a.control_mode === 'auto') {\n    return {\n      ...a,\n      classification: decision === 'TURN ON' ? 'TURN-ON' : 'KEEP-OFF'\n    };\n  }\n\n  if (a.control_mode === 'semi-auto') {\n    const status   = a.status.toLowerCase();\n    const deciding = decision.toLowerCase();\n\n    let classification;\n    if      (status === 'off' && deciding === 'turn on')  classification = 'TURN-ON';\n    else if (status === 'on'  && deciding === 'turn off') classification = 'TURN-OFF';\n    else if (status === 'off' && deciding === 'turn off') classification = 'KEEP-OFF';\n    else if (status === 'on'  && deciding === 'turn on')  classification = 'KEEP-ON';\n    else classification = a.classification; // fallback\n\n    return { ...a, classification };\n  }\n\n  return a; // fallback for unknown control mode\n});\n\nreturn [{ json: { ...mainJson, actuators: updatedActuators } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1344,
+        32
+      ],
+      "id": "ad1c2240-c434-4489-8bd9-d1c8486a0d0a",
+      "name": "Preliminary_Decisions"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=CURRENT TIME:\n{{$json.time}}\n\nFARM INFO:\n- Crop type:    {{$json.crop.type}}\n- Growth stage: {{$json.crop.growth_stage}}\n- Farm mode:    {{$json.crop.mode}}\n\nSENSOR READINGS:\n- Soil moisture: {{$json.sensors[0].value}} %\n- Temperature:   {{$json.sensors[1].value}} °C\n- Air humidity:  {{$json.sensors[2].value}} %\n- Luminosity:    {{$json.sensors[3].value}} %\n\nACTUATORS ({{$json.actuators.length}} total):\n{{$json.actuators}}\n\nReturn a JSON array of exactly {{$json.actuators.length}} decision(s), one per actuator, same order.\nOnly output the array, nothing else.\n\nIMPORTANT: You received {{$json.actuators.length}} actuator(s): {{$json.actuators.map(a => a.type).join(', ')}}.\nReturn EXACTLY {{$json.actuators.length}} decision(s), only for these types: {{$json.actuators.map(a => a.type).join(', ')}}.\nAny other type in your output is a critical error.\n\nAllowed decision values:\n  - All actuators → \"TURN ON\" or \"TURN OFF\"",
+        "options": {
+          "systemMessage": "You are an expert agricultural AI. Your ONLY job is to decide whether to activate or deactivate each actuator based on the farm data you receive.\n\n─── DECISION GUIDELINES ────────────────────────────────────────────\n\nPUMP (irrigation):\n  - Turn ON if soil_moisture is low relative to the crop and growth stage needs\n  - Turn OFF if soil_moisture is already sufficient or high\n  - Consider temperature and air_humidity: high temperature + low humidity = more water needed\n  - Consider the crop type and growth stage (e.g. flowering stage is critical for water)\n\nFAN (ventilation):\n  - Turn ON if temperature is too high or air_humidity is too high for the crop\n  - Turn ON if luminosity is very high and temperature is already elevated\n  - Turn OFF if temperature and humidity are within acceptable range for the crop and growth stage\n\nAlways factor in:\n  - The farm mode (e.g. growth_priority = prioritize plant health over energy saving)\n  - The crop type and its known agronomic thresholds\n  - The current time (avoid unnecessary irrigation at peak sun hours, etc.)\n  - The combination of all sensor values together, not each in isolation\n\n─── OUTPUT RULES ───────────────────────────────────────────────────\n\nReturn ONLY a valid JSON array of decisions, one object per actuator, in the exact same order you received them.\nEach object must have exactly two fields: \"type\" and \"decision\".\nNo explanation, no commentary, no markdown, no code blocks.\n\nAllowed decision values for all actuators:\n  - \"TURN ON\"\n  - \"TURN OFF\"\n\nExample output format:\n[{\"type\": \"pump\", \"decision\": \"TURN ON\"}, {\"type\": \"fan\", \"decision\": \"TURN OFF\"}]\n\n─── STRICT ACTUATOR CONSTRAINT ───────────────────────────────────────\n\nYou will receive a list of actuators. Count them before doing anything.\nYou must return EXACTLY that number of decisions, for EXACTLY those types you received.\nNever invent actuators that were not in your input.\nBefore outputting, verify: does every type in your output exist in your input? If not, remove it."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        992,
+        32
+      ],
+      "id": "7c9e0650-012f-4cbe-a077-c832220683d1",
+      "name": "Pre_Decider"
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = items[0].json;\n\n// ─── Helpers ──────────────────────────────────────────────────────────────────\n\nfunction shouldIncludeActuator(actuator) {\n  if (actuator.control_mode === 'auto')      return actuator.skipped === false;\n  if (actuator.control_mode === 'semi-auto') return actuator.classification !== 'FUTURE-RE-EVALUATING';\n  return false;\n}\n\n// ─── Filter actuators first ───────────────────────────────────────────────────\n\nconst filteredActuators = (input.actuators ?? [])\n  .filter(shouldIncludeActuator)\n  .map(a => ({\n    type:           a.type,\n    status:         a.status,\n    control_mode:   a.control_mode,\n    classification: a.classification\n  }));\n\n// ─── Stop if no actuators passed the filter ───────────────────────────────────\n\nif (filteredActuators.length === 0) {\n  return null;\n}\n\n// ─── Filter & reshape ─────────────────────────────────────────────────────────\n\nconst output = {\n  time: input.meta?.triggered_at ?? null,\n  farm: input.farm ?? null,\n  sensors: (input.sensors ?? []).map(s => ({\n    name:  s.name,\n    value: s.value\n  })),\n  actuators: filteredActuators\n};\n\nreturn [{ json: output }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        768,
+        32
+      ],
+      "id": "30647d88-ef7e-4add-96de-c3e105587914",
+      "name": "Filter actuators + important data only"
+    },
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        544,
+        32
+      ],
+      "id": "0e6265d4-a796-4813-b8be-20877d9427fc",
+      "name": "Data_Fetcher"
+    }
+  ],
+  "pinData": {
+    "Data_Fetcher": [
+      {
+        "json": {
+          "meta": {
+            "run_id": "a9b08d-b6fc4b5a25fd",
+            "triggered_at": "2026-03-27T13:38:32"
+          },
+          "location": {
+            "latitude": 36.71743830106968,
+            "longitude": 3.1542778015136723,
+            "timezone": "Africa/Algiers"
+          },
+          "crop": {
+            "type": "orange",
+            "growth_stage": "flowering",
+            "mode": "growth_priority"
+          },
+          "sensors": [
+            {
+              "type": "soil_moisture",
+              "value": null,
+              "description": null
+            },
+            {
+              "type": "temperature",
+              "value": null,
+              "description": null
+            },
+            {
+              "type": "air_humidity",
+              "value": null,
+              "description": null
+            },
+            {
+              "type": "luminosity",
+              "value": null,
+              "description": null
+            }
+          ],
+          "actuators": [
+            {
+              "type": "pump",
+              "status": "off",
+              "control_mode": "auto",
+              "classification": "FREE",
+              "skipped": false,
+              "run": {
+                "active": false,
+                "execute_at": null,
+                "duration_minutes": null,
+                "execute_until": null
+              },
+              "re_evaluation": {
+                "active": false,
+                "skipped": false,
+                "interval": {
+                  "start": null,
+                  "end": null
+                }
+              }
+            },
+            {
+              "type": "fan",
+              "status": "off",
+              "control_mode": "semi-auto",
+              "classification": "OFF",
+              "skipped": false,
+              "recommended_action": null,
+              "run": {
+                "active": false,
+                "execute_at": null,
+                "duration_minutes": null,
+                "execute_until": null
+              },
+              "re_evaluation": {
+                "active": false,
+                "skipped": false,
+                "interval": {
+                  "start": null,
+                  "end": null
+                }
+              }
+            }
+          ],
+          "notifications": null,
+          "warnings": [
+            {
+              "name": "frost_risk",
+              "active": false,
+              "severity": null,
+              "description": null
+            },
+            {
+              "name": "heavy_rainfall",
+              "active": false,
+              "severity": null,
+              "description": null
+            },
+            {
+              "name": "high_humidity_level",
+              "active": false,
+              "severity": null,
+              "description": null
+            },
+            {
+              "name": "high_temperature_detected",
+              "active": false,
+              "severity": null,
+              "description": null
+            },
+            {
+              "name": "insufficient_sunlight",
+              "active": false,
+              "severity": null,
+              "description": null
+            },
+            {
+              "name": "excessive_sunlight",
+              "active": false,
+              "severity": null,
+              "description": null
+            },
+            {
+              "name": "low_soil_moisture",
+              "active": false,
+              "severity": null,
+              "description": null
+            },
+            {
+              "name": "overwatering",
+              "active": false,
+              "severity": null,
+              "description": null
+            },
+            {
+              "name": "strong_wind",
+              "active": false,
+              "severity": null,
+              "description": null
+            }
+          ],
+          "recommendation": null,
+          "weather": {
+            "precipitation_probability": null,
+            "state": null,
+            "summary": null
+          },
+          "history": {
+            "runs": null,
+            "images": null
+          },
+          "image_processing": {
+            "summary": null,
+            "features": {
+              "rain_detected": null,
+              "water_on_leaves": null,
+              "cloud_cover": null,
+              "lighting_level": null,
+              "shadows_present": null,
+              "plant_motion_detected": null,
+              "motion_intensity": null
+            },
+            "confidence": null
+          }
+        }
+      }
+    ]
+  },
+  "connections": {
+    "Groq Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Pre_Decider",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pre_Decider": {
+      "main": [
+        [
+          {
+            "node": "Preliminary_Decisions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter actuators + important data only": {
+      "main": [
+        [
+          {
+            "node": "Pre_Decider",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Data_Fetcher": {
+      "main": [
+        [
+          {
+            "node": "Filter actuators + important data only",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "9654092b-c6b0-41fd-bd31-80f164da0555",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "af73889df6e41fa948c9be83dfce5dd763c977531265542df4d02721aa9d9365"
+  },
+  "id": "cAYa0IliTa0TJW82",
+  "tags": []
+}

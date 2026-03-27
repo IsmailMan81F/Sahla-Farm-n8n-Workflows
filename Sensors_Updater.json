@@ -1,0 +1,413 @@
+{
+  "name": "Sensors_Updater",
+  "nodes": [
+    {
+      "parameters": {
+        "model": "openai/gpt-oss-safeguard-20b",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        152,
+        192
+      ],
+      "id": "09f7dbd1-e383-4da8-bf57-8dc7efc723d4",
+      "name": "Groq Chat Model3",
+      "credentials": {
+        "groqApi": {
+          "id": "w2kySJjiKQ2jRWG1",
+          "name": "Groq account 3"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const main = items[0].json;\n\nconst output = {\n  time: main.meta.triggered_at,\n  crop: main.crop ?? null,\n  sensors: (main.sensors ?? []).map(s => ({\n    type:  s.type,\n    value: s.value\n  }))\n};\n\nreturn [{ json: output }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -144,
+        -32
+      ],
+      "id": "b8713505-fa93-4b4f-a88e-5c728ca3079e",
+      "name": "filter only the sensor data"
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw      = JSON.parse($input.first().json.output);\nconst mainJson = { ...$('Final_Decisions').first().json };\n\n// ─── Merge sensor descriptions ────────────────────────────────────────────────\n\nconst descriptionMap = {};\nraw.forEach(s => {\n  descriptionMap[s.type.toLowerCase()] = s.description;\n});\n\nmainJson.sensors = mainJson.sensors.map(s => ({\n  ...s,\n  description: descriptionMap[s.type.toLowerCase()] ?? s.description\n}));\n\nreturn [{ json: mainJson }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        432,
+        -32
+      ],
+      "id": "882c6270-d797-4862-a997-f23a5aaf9709",
+      "name": "Sensors_Updater"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=CURRENT TIME:\n{{$json.time}}\n\nCROP INFO:\n- Type:         {{$json.crop.type}}\n- Growth stage: {{$json.crop.growth_stage}}\n- Farm mode:    {{$json.crop.mode}}\n\nSENSOR READINGS ({{$json.sensors.length}} sensors):\n{{$json.sensors.map(s => `- ${s.type}: ${s.value}`).join('\\n')}}\n\nFor each of the {{$json.sensors.length}} sensor(s) above, write a short urgent or calm description (~68 characters) interpreting the value's impact on the {{$json.crop.type}} plant at the {{$json.crop.growth_stage}} stage.\n\nReturn a JSON array of exactly {{$json.sensors.length}} objects, each with \"type\" and \"description\" only.\nSame order as received. No explanation, no markdown.",
+        "options": {
+          "systemMessage": "You are an expert agricultural sensor analyst. You receive real-time sensor readings from a smart farm and your job is to interpret each reading in the context of the crop type and growth stage, and write a short human-friendly description for each sensor.\n\n─── YOUR JOB ────────────────────────────────────────────────────────────────────\n\nFor each sensor you receive, write a single plain-language description that:\n- Interprets what the current value means for the plant specifically\n- Reflects urgency when values are critical or dangerous (e.g. \"dangerously high\", \"critically dry\", \"severe risk\")\n- Uses calm neutral language when values are within acceptable range\n- Is approximately 68 characters long (strict maximum 90 characters)\n- Is written in second person, addressing the farmer directly (e.g. \"Your soil is...\", \"The plant is...\")\n- Never just repeats the number, always interprets its impact on the plant\n\n─── SENSOR TYPES ────────────────────────────────────────────────────────────────\n\n- soil_moisture : 0-100%, low = dry = needs irrigation, high = wet = risk of overwatering\n- temperature   : 0-100°C, interpret relative to crop thresholds, high = heat stress risk\n- air_humidity  : 0-100%, too low = dehydration risk, too high = fungal/disease risk\n- luminosity    : 0-100%, too low = insufficient photosynthesis, too high = sun stress\n\n─── URGENCY SCALE ───────────────────────────────────────────────────────────────\n\nAlways calibrate your language to the severity:\n- 0-20% of safe range   → use words like \"critically\", \"severely\", \"dangerously\"\n- 20-40% of safe range  → use words like \"very\", \"quite\", \"significantly\"\n- 40-60% of safe range  → use words like \"slightly\", \"moderately\"\n- 60-100% of safe range → use calm neutral language, reassure the farmer\n\n─── OUTPUT FORMAT ───────────────────────────────────────────────────────────────\n\nReturn ONLY a valid JSON array, one object per sensor, same order as received.\nEach object must have exactly two fields: \"type\" and \"description\".\nNo explanation, no commentary, no markdown, no code blocks.\n\nExample:\n[\n  {\"type\": \"soil_moisture\", \"description\": \"Your soil is critically dry, irrigate immediately to prevent crop loss.\"},\n  {\"type\": \"temperature\",   \"description\": \"Temperature is dangerously high, your orange trees are under severe heat stress.\"},\n  {\"type\": \"air_humidity\",  \"description\": \"Humidity is comfortable and well suited for the flowering stage.\"},\n  {\"type\": \"luminosity\",    \"description\": \"Light levels are strong and healthy for active photosynthesis right now.\"}\n]\n\n─── STRICT OUTPUT RULES ─────────────────────────────────────────────────────────\n\n- Return ONLY the JSON array, nothing else\n- Exactly the same number of objects as sensors received, same order\n- Each description must be ~68 characters, maximum 90 characters\n- Do not add any extra fields\n- Do not rename sensor types"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        80,
+        -32
+      ],
+      "id": "28a522c5-9bb4-4752-881a-131e39ec7277",
+      "name": "Sensors_Updater_Agent"
+    },
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -368,
+        -32
+      ],
+      "id": "5aab907e-0079-4f5d-b956-eb9709ed5c46",
+      "name": "Final_Decisions"
+    }
+  ],
+  "pinData": {
+    "Final_Decisions": [
+      {
+        "json": {
+          "meta": {
+            "run_id": "e2f046-5904c26089eb",
+            "triggered_at": "2026-03-27T13:46:11"
+          },
+          "location": {
+            "latitude": 36.71743830106968,
+            "longitude": 3.1542778015136723,
+            "timezone": "Africa/Algiers"
+          },
+          "crop": {
+            "type": "orange",
+            "growth_stage": "flowering",
+            "mode": "growth_priority"
+          },
+          "sensors": [
+            {
+              "type": "soil_moisture",
+              "value": 0,
+              "description": null
+            },
+            {
+              "type": "temperature",
+              "value": 20.2,
+              "description": null
+            },
+            {
+              "type": "air_humidity",
+              "value": 67.5,
+              "description": null
+            },
+            {
+              "type": "luminosity",
+              "value": 42,
+              "description": null
+            }
+          ],
+          "actuators": [
+            {
+              "type": "pump",
+              "status": "off",
+              "control_mode": "auto",
+              "classification": "NEED-RE-EVALUATION",
+              "skipped": false,
+              "run": {
+                "execute_at": null,
+                "duration_minutes": null,
+                "execute_until": null
+              },
+              "re_evaluation": {
+                "active": true,
+                "skipped": false,
+                "interval": {
+                  "start": "2026-03-27T18:00:00",
+                  "end": "2026-03-28T06:00:00"
+                }
+              }
+            },
+            {
+              "type": "fan",
+              "status": "off",
+              "control_mode": "semi-auto",
+              "classification": "KEEP-OFF",
+              "skipped": false,
+              "recommended_action": null,
+              "run": {
+                "active": false,
+                "execute_at": null,
+                "duration_minutes": null,
+                "execute_until": null
+              },
+              "re_evaluation": {
+                "active": false,
+                "skipped": false,
+                "interval": {
+                  "start": null,
+                  "end": null
+                }
+              }
+            }
+          ],
+          "notifications": null,
+          "warnings": [
+            {
+              "name": "frost_risk",
+              "active": false,
+              "severity": null,
+              "description": null
+            },
+            {
+              "name": "heavy_rainfall",
+              "active": false,
+              "severity": null,
+              "description": null
+            },
+            {
+              "name": "high_humidity_level",
+              "active": false,
+              "severity": null,
+              "description": null
+            },
+            {
+              "name": "high_temperature_detected",
+              "active": false,
+              "severity": null,
+              "description": null
+            },
+            {
+              "name": "insufficient_sunlight",
+              "active": false,
+              "severity": null,
+              "description": null
+            },
+            {
+              "name": "excessive_sunlight",
+              "active": false,
+              "severity": null,
+              "description": null
+            },
+            {
+              "name": "low_soil_moisture",
+              "active": false,
+              "severity": null,
+              "description": null
+            },
+            {
+              "name": "overwatering",
+              "active": false,
+              "severity": null,
+              "description": null
+            },
+            {
+              "name": "strong_wind",
+              "active": false,
+              "severity": null,
+              "description": null
+            }
+          ],
+          "recommendation": "Heavy rain has soaked the soil and leaves, so we’re holding off on irrigation for now and will re-check later when the ground dries.",
+          "weather": {
+            "precipitation_probability": 18,
+            "state": "cloudy",
+            "summary": "Over the next 48 hours, Algiers will experience a mix of cloudy and sunny intervals with a slight chance of rain in the early hours. Temperature will gradually increase reaching a peak during midday. No significant weather disturbances are expected.",
+            "insights": {
+              "highlights": {
+                "max_temperature": {
+                  "value": 17.5,
+                  "time": "2026-03-27T14:00"
+                },
+                "min_temperature": {
+                  "value": 6.8,
+                  "time": "2026-03-28T06:00"
+                }
+              },
+              "hourly": [
+                {
+                  "time": "2026-03-27T00:00",
+                  "temperature": 9.8,
+                  "humidity": 79,
+                  "precipitation_probability": 0
+                },
+                {
+                  "time": "2026-03-27T03:00",
+                  "temperature": 8.5,
+                  "humidity": 81,
+                  "precipitation_probability": 5
+                },
+                {
+                  "time": "2026-03-27T06:00",
+                  "temperature": 9.1,
+                  "humidity": 72,
+                  "precipitation_probability": 3
+                },
+                {
+                  "time": "2026-03-27T09:00",
+                  "temperature": 12.2,
+                  "humidity": 63,
+                  "precipitation_probability": 0
+                },
+                {
+                  "time": "2026-03-27T12:00",
+                  "temperature": 16.3,
+                  "humidity": 44,
+                  "precipitation_probability": 0
+                },
+                {
+                  "time": "2026-03-27T15:00",
+                  "temperature": 17,
+                  "humidity": 41,
+                  "precipitation_probability": 0
+                },
+                {
+                  "time": "2026-03-27T18:00",
+                  "temperature": 13.5,
+                  "humidity": 67,
+                  "precipitation_probability": 8
+                },
+                {
+                  "time": "2026-03-27T21:00",
+                  "temperature": 11.4,
+                  "humidity": 82,
+                  "precipitation_probability": 10
+                },
+                {
+                  "time": "2026-03-28T00:00",
+                  "temperature": 10.8,
+                  "humidity": 75,
+                  "precipitation_probability": 3
+                },
+                {
+                  "time": "2026-03-28T03:00",
+                  "temperature": 8.5,
+                  "humidity": 84,
+                  "precipitation_probability": 0
+                },
+                {
+                  "time": "2026-03-28T06:00",
+                  "temperature": 6.8,
+                  "humidity": 89,
+                  "precipitation_probability": 0
+                },
+                {
+                  "time": "2026-03-28T09:00",
+                  "temperature": 11,
+                  "humidity": 69,
+                  "precipitation_probability": 0
+                },
+                {
+                  "time": "2026-03-28T12:00",
+                  "temperature": 15.4,
+                  "humidity": 47,
+                  "precipitation_probability": 0
+                },
+                {
+                  "time": "2026-03-28T15:00",
+                  "temperature": 15.8,
+                  "humidity": 44,
+                  "precipitation_probability": 0
+                },
+                {
+                  "time": "2026-03-28T18:00",
+                  "temperature": 14.3,
+                  "humidity": 52,
+                  "precipitation_probability": 0
+                },
+                {
+                  "time": "2026-03-28T21:00",
+                  "temperature": 10.7,
+                  "humidity": 71,
+                  "precipitation_probability": 0
+                }
+              ]
+            }
+          },
+          "image_processing": {
+            "summary": "Heavy rainfall has left the soil and leaves visibly wet; cloud coverage is high, blocking the sun; shadows are present despite low lighting; plants show moderate motion due to wind.",
+            "features": {
+              "rain_detected": true,
+              "water_on_leaves": true,
+              "cloud_cover": "high",
+              "lighting_level": "low",
+              "shadows_present": true,
+              "plant_motion_detected": true,
+              "motion_intensity": "moderate"
+            },
+            "confidence": 93
+          }
+        }
+      }
+    ]
+  },
+  "connections": {
+    "Groq Chat Model3": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Sensors_Updater_Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "filter only the sensor data": {
+      "main": [
+        [
+          {
+            "node": "Sensors_Updater_Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sensors_Updater_Agent": {
+      "main": [
+        [
+          {
+            "node": "Sensors_Updater",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Final_Decisions": {
+      "main": [
+        [
+          {
+            "node": "filter only the sensor data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "6bf5f8ed-83e4-48c0-91a6-1c081146672a",
+  "meta": {
+    "instanceId": "af73889df6e41fa948c9be83dfce5dd763c977531265542df4d02721aa9d9365"
+  },
+  "id": "wOvHHwZlxxkdY8jE",
+  "tags": []
+}
