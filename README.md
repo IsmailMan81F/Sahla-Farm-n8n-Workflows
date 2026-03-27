@@ -55,3 +55,7 @@ There are two : one for the runs and the second for the images, both sends scree
 
 ### *11) Data Sender :*
 updates the entities in home asssitant (actuators' states, times (for both run and re-evaluation), recommended actions on "semi-auto" actuators, and also send a big json to an entity that contains sensors descriptions, warnings, recommendation and weather data
+
+## Screenshots :
+![full detailed workflow](screenshots/full_detailed_workflow.png)
+![full modular workflow](screenshots/full_workflow.png)
