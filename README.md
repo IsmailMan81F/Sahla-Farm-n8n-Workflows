@@ -2,9 +2,9 @@
 
 >***NOTES***:
 >1. All the workflows are provided in this repo
->2. The Full_Workflow contains the sub workflows connected with each other, considered as Modular-Friendly
->3. The Full_Detailed_Workflow contains all the nodes in one single workflow line (used for debugging)
->4. The Data_Fetcer fetches real sensor data from their entities ant not from helpers
+>2. The Full_Workflow contains the sub workflows connected with each other, considered as a Modular-Friendly workflow
+>3. The Full_Detailed_Workflow contains all the nodes in one single workflow line 
+>4. The Data_Fetcher fetches real sensor data from their entities ant not from helpers
 >5. The agent's crendentials can be used directly (API keys are from the sahla_farmer google account)
 >6. Running the full workflow at the one time for different times, leads to "many requests error in the agents"
 
