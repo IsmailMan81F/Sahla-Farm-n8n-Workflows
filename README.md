@@ -7,7 +7,7 @@
 >4. The Data_Fetcher fetches real sensor data from their entities ant not from helpers
 >5. The agent's crendentials can be used directly (API keys are from the sahla_farmer google account)
 >6. Running the worklfow many times reaches the "agents' requests limit" very fast
->7. Each workflow contains a mock-up data in its input, so you can test it directly
+>7. Each workflow contains a mock-up data in its input, so that you can test it directly
 
 ## Rapport :
 
